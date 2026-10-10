@@ -2,7 +2,6 @@ package nvtascii
 
 import (
 	"bytes"
-	"log"
 	"testing"
 )
 
@@ -21,10 +20,10 @@ func TestNVTAsciiRestrictedChars(t *testing.T) {
 	for _, tc := range testCases {
 		actual, err := FromString(tc.input)
 		if err != nil {
-			log.Fatalf("%v", err)
+			t.Fatalf("%v", err)
 		}
 		if !bytes.Equal([]byte(actual), tc.expected) {
-			log.Fatalf(
+			t.Fatalf(
 				"%v case: found '%v', expected '%v'",
 				tc.caseName,
 				actual,
@@ -47,7 +46,7 @@ func TestNVTAsciiExceptionCases(t *testing.T) {
 	for _, tc := range testCases {
 		actual, err := FromString(tc.input)
 		if err == nil { // expected error!!
-			log.Fatalf(
+			t.Fatalf(
 				"%v case: expected error on input '%s', found '%v'",
 				tc.caseName,
 				tc.input,
