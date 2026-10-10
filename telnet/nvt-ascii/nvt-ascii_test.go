@@ -12,14 +12,14 @@ func TestNVTAsciiRestrictedChars(t *testing.T) {
 		expected nvtAsciiString
 		caseName string
 	}{
-		{"bart", nvtAsciiString("BART"), "normal"},
+		{"bart", nvtAsciiString("BART"), "basic"},
 		{"\x00walter", nvtAsciiString("\x00WALTER"), "lower bound"},
 		{"\x7fwalter", nvtAsciiString("\x7fWALTER"), "upper bound"},
 		{"BaRt", nvtAsciiString("BART"), "normalize string"},
 	}
 
 	for _, tc := range testCases {
-		actual, err := ToNVTAscii(tc.input)
+		actual, err := FromString(tc.input)
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
@@ -31,7 +31,6 @@ func TestNVTAsciiRestrictedChars(t *testing.T) {
 				tc.expected,
 			)
 		}
-
 	}
 }
 
@@ -46,7 +45,7 @@ func TestNVTAsciiExceptionCases(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		actual, err := ToNVTAscii(tc.input)
+		actual, err := FromString(tc.input)
 		if err == nil { // expected error!!
 			log.Fatalf(
 				"%v case: expected error on input '%s', found '%v'",

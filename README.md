@@ -10,12 +10,12 @@ FTP Implementation for WSU Networks and Security Course
 > NOTE: commands assume you are calling from project root
 ## Building The project
 ```bash
-go build main.go # build binary named "main"
+go build main.go # binary w/ default name "main"
 ./main <args> # run the project with any args
 ```
 
 ## Project Testing
 
 ```bash
-go test ./... # discovers and runs all tests
+go test ./... # discovers and runs all tests from root down
 ```
