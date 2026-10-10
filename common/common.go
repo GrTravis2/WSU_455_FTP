@@ -3,6 +3,6 @@
 // for common utility purposes.
 package common
 
-func NotImplentedError() {
+func NotImplementedError() {
 	panic("not implemented!")
 }
