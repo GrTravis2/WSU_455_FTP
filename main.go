@@ -1,4 +1,4 @@
-package wsu455ftp
+package main
 
 import "wsu455ftp/common"
 
