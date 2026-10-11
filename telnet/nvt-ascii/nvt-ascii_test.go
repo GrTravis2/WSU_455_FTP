@@ -41,6 +41,7 @@ func TestNVTAsciiExceptionCases(t *testing.T) {
 		{"😳", "illegal char"},
 		{"\xff", "underflow"},
 		{"\x80", "upper bound"},
+		{"\u017f", "weird upper conv to 'S' should fail"},
 	}
 
 	for _, tc := range testCases {
