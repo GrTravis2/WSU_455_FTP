@@ -11,12 +11,11 @@ func TestNVTAsciiRestrictedChars(t *testing.T) {
 		expected nvtAsciiString
 		caseName string
 	}{
-		{"bart", nvtAsciiString("BART"), "basic"},
-		{"USER bart" + SP + CRLF, nvtAsciiString("USER BART \r\n"), "user FTP cmd example"},
+		{"bart", nvtAsciiString("bart"), "basic"},
+		{"USER bart" + SP + CRLF, nvtAsciiString("USER bart \r\n"), "user FTP cmd example"},
 		{"STOU" + SP + CRLF, nvtAsciiString("STOU \r\n"), "store unique FTP cmd example"},
-		{"\x00walter", nvtAsciiString("\x00WALTER"), "lower bound"},
-		{"\x7fwalter", nvtAsciiString("\x7fWALTER"), "upper bound"},
-		{"BaRt", nvtAsciiString("BART"), "normalize string"},
+		{"\x00walter", nvtAsciiString("\x00walter"), "lower bound"},
+		{"\x7fwalter", nvtAsciiString("\x7fwalter"), "upper bound"},
 	}
 
 	for _, tc := range testCases {
@@ -43,7 +42,6 @@ func TestNVTAsciiExceptionCases(t *testing.T) {
 		{"😳", "illegal char"},
 		{"\xff", "underflow"},
 		{"\x80", "upper bound"},
-		{"\u017f", "weird upper conv to 'S' should fail"},
 	}
 
 	for _, tc := range testCases {

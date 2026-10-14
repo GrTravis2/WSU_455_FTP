@@ -5,7 +5,6 @@ package nvtascii
 
 import (
 	"fmt"
-	"strings"
 )
 
 // Opaque NVT ASCII compatible string as outlined in [RFC 854, Telnet Protocol](https://www.rfc-editor.org/info/rfc854/)
@@ -30,5 +29,5 @@ func FromString(s string) (nvtAsciiString, error) {
 		}
 	}
 	// normalize string case per FTP spec
-	return nvtAsciiString([]byte(strings.ToUpper(s))), nil
+	return nvtAsciiString([]byte(s)), nil
 }
