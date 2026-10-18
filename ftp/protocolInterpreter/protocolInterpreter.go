@@ -5,7 +5,6 @@ package protocolinterpreter
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 	"strings"
 )
@@ -13,9 +12,8 @@ import (
 // FTP Command Enum Type
 type FTPTokenType uint
 
+/* COMMAND TOKENS */
 const (
-	/* COMMAND TOKENS */
-
 	USER FTPTokenType = iota // USER <username ::= string>
 	PASS                     // PASS <password ::= string>
 	QUIT                     // QUIT
@@ -26,15 +24,6 @@ const (
 	RETR                     // RETR <path-name ::= string>
 	STOR                     //	STOR <path-name ::= string>
 	NOOP                     // NOOP
-
-	/* ARGUMENT TOKENS */
-
-	STRING        // NVT ASCII STRING
-	NUMBER        // DECIMAL INT [1, 255]
-	FORMCODE      // N | T | C
-	TYPECODE      // A | E | I | L
-	STRUCTURECODE // F | R | P
-	MODECODE      // S | B | C
 )
 
 type FTPCommand struct {
@@ -89,7 +78,7 @@ const (
 type TypeArgs struct {
 	Code     TypeCode
 	Format   FormatCode
-	ByteSize uint8
+	ByteSize uint8 // logical byte size, only relevant if Format is LOCAL
 }
 type ModeArgs struct{ Code ModeCode }
 type FormArgs struct{ Code FormatCode }
@@ -110,7 +99,8 @@ var cmdMapping = map[string]FTPCommand{
 
 // parse an FTP control message into FTP Commands
 func Interpret(msg string) ([]FTPCommand, error) {
-	words := strings.Split(msg, " ")
+	// remove all <CRLF> and split on <SP>
+	words := strings.Split(strings.ReplaceAll(msg, "\r\n", ""), " ")
 	cmds, err := parse(words)
 	if err != nil {
 		return []FTPCommand{}, err
@@ -125,7 +115,7 @@ func parse(words []string) ([]FTPCommand, error) {
 	return parseLoop(words, tokens)     // pass buffer as reference slice
 }
 
-// Recursive helper for lexing word input
+// Recursive helper for parsing word input
 func parseLoop(words []string, tokens []FTPCommand) ([]FTPCommand, error) {
 	if len(words) == 0 { // base case
 		return tokens, nil
@@ -170,14 +160,13 @@ func popArgs(cmd *FTPCommand, words []string) ([]string, error) {
 	default:
 		// we check earlier that command is valid, if we get here
 		// panic and report so we can see how this could have happened!
-		log.Panicf("unexpected command found '%v'", cmd.Token)
-		return []string{}, nil // cannot get here, but makes compiler happy
+		panic(fmt.Sprintf("unexpected command found '%v'", cmd.Token))
 	}
 }
 
 func parseUser(cmd *FTPCommand, words []string) ([]string, error) {
 	if len(words) == 0 {
-		return words, missingArgumentError(cmd.Token)
+		return words, missingRequiredArgError(cmd.Token)
 	}
 	args, _ := cmd.Args.(UserArgs)
 	args.Username = words[0]
@@ -187,7 +176,7 @@ func parseUser(cmd *FTPCommand, words []string) ([]string, error) {
 
 func parsePass(cmd *FTPCommand, words []string) ([]string, error) {
 	if len(words) == 0 {
-		return words, missingArgumentError(cmd.Token)
+		return words, missingRequiredArgError(cmd.Token)
 	}
 	args, _ := cmd.Args.(PassArgs)
 	args.Pasword = words[0]
@@ -197,7 +186,7 @@ func parsePass(cmd *FTPCommand, words []string) ([]string, error) {
 
 func parsePort(cmd *FTPCommand, words []string) ([]string, error) {
 	if len(words) == 0 {
-		return words, missingArgumentError(cmd.Token)
+		return words, missingRequiredArgError(cmd.Token)
 	}
 	args, _ := cmd.Args.(PortArgs)
 	portNum, err := strconv.ParseUint(words[0], 10, 8)
@@ -211,7 +200,7 @@ func parsePort(cmd *FTPCommand, words []string) ([]string, error) {
 
 func parseType(cmd *FTPCommand, words []string) ([]string, error) {
 	if len(words) == 0 {
-		return words, missingArgumentError(cmd.Token)
+		return words, missingRequiredArgError(cmd.Token)
 	}
 	args, _ := cmd.Args.(TypeArgs)
 	switch words[0] {
@@ -267,7 +256,7 @@ func parseType(cmd *FTPCommand, words []string) ([]string, error) {
 
 func parseMode(cmd *FTPCommand, words []string) ([]string, error) {
 	if len(words) == 0 {
-		return words, missingArgumentError(cmd.Token)
+		return words, missingRequiredArgError(cmd.Token)
 	}
 	args, _ := cmd.Args.(ModeArgs)
 	switch words[0] {
@@ -286,7 +275,7 @@ func parseMode(cmd *FTPCommand, words []string) ([]string, error) {
 
 func parseStru(cmd *FTPCommand, words []string) ([]string, error) {
 	if len(words) == 0 {
-		return words, missingArgumentError(cmd.Token)
+		return words, missingRequiredArgError(cmd.Token)
 	}
 	args, _ := cmd.Args.(StructureArgs)
 	switch words[0] {
@@ -305,7 +294,7 @@ func parseStru(cmd *FTPCommand, words []string) ([]string, error) {
 
 func parseRetr(cmd *FTPCommand, words []string) ([]string, error) {
 	if len(words) == 0 {
-		return words, missingArgumentError(cmd.Token)
+		return words, missingRequiredArgError(cmd.Token)
 	}
 	args, _ := cmd.Args.(RetrArgs)
 	args.Path = words[0]
@@ -315,7 +304,7 @@ func parseRetr(cmd *FTPCommand, words []string) ([]string, error) {
 
 func parseStor(cmd *FTPCommand, words []string) ([]string, error) {
 	if len(words) == 0 {
-		return words, missingArgumentError(cmd.Token)
+		return words, missingRequiredArgError(cmd.Token)
 	}
 	args, _ := cmd.Args.(StorArgs)
 	args.Path = words[0]
@@ -323,6 +312,6 @@ func parseStor(cmd *FTPCommand, words []string) ([]string, error) {
 	return words[1:], nil
 }
 
-func missingArgumentError(token FTPTokenType) error {
+func missingRequiredArgError(token FTPTokenType) error {
 	return fmt.Errorf("command '%v' missing required arg", token)
 }
