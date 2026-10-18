@@ -5,6 +5,7 @@ package protocolinterpreter
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 )
@@ -26,6 +27,35 @@ const (
 	STOR                     //	STOR <path-name ::= string>
 	NOOP                     // NOOP
 )
+
+// Implement Stringer interface for enum pretty printing
+func (t FTPTokenType) String() string {
+	switch t {
+	case USER:
+		return "USER"
+	case PASS:
+		return "PASS"
+	case QUIT:
+		return "QUIT"
+	case PORT:
+		return "PORT"
+	case TYPE:
+		return "TYPE"
+	case MODE:
+		return "MODE"
+	case STRU:
+		return "STRU"
+	case RETR:
+		return "RETR"
+	case STOR:
+		return "STOR"
+	case NOOP:
+		return "NOOP"
+	default:
+		log.Panicf("missing Stringer for token %v, please add it!", uint(t))
+		return ""
+	}
+}
 
 type FTPCommand struct {
 	Token FTPTokenType
@@ -101,7 +131,8 @@ var cmdMapping = map[string]FTPCommand{
 // parse an FTP control message into FTP Commands
 func Interpret(msg string) ([]FTPCommand, error) {
 	// remove all <CRLF> and split on <SP>
-	words := strings.Split(strings.ReplaceAll(msg, "\r\n", ""), " ")
+	cleaned := strings.TrimSpace(strings.ReplaceAll(msg, "\r\n", ""))
+	words := strings.Split(cleaned, " ")
 	cmds, err := parse(words)
 	if err != nil {
 		return []FTPCommand{}, err
@@ -194,6 +225,9 @@ func parsePort(cmd *FTPCommand, words []string) ([]string, error) {
 	if err != nil {
 		return words, fmt.Errorf("unable to parse '%s' into uint8", words[0])
 	}
+	if portNum == 0 {
+		return words, fmt.Errorf("cannot have port number %d", portNum)
+	}
 	args.PortNum = uint8(portNum)
 	cmd.Args = args
 	return words[1:], nil
@@ -232,6 +266,9 @@ func parseType(cmd *FTPCommand, words []string) ([]string, error) {
 		if err != nil {
 			formatString := "unable to parse byte size '%v' into uint8"
 			return words, fmt.Errorf(formatString, words[1])
+		}
+		if byteSize == 0 {
+			return words, fmt.Errorf("cannot have byte size of %d", byteSize)
 		}
 		args.ByteSize = uint8(byteSize)
 		cmd.Args = args
@@ -319,3 +356,16 @@ func parseStor(cmd *FTPCommand, words []string) ([]string, error) {
 func missingRequiredArgError(token FTPTokenType) error {
 	return fmt.Errorf("command '%v' missing required arg", token)
 }
+
+/* Private helpers for creating FTPCommands, it will help keep things more concise for testing */
+
+func makeUserCmd(user string) FTPCommand { return FTPCommand{USER, UserArgs{user}} }
+func makePassCmd(pass string) FTPCommand { return FTPCommand{PASS, PassArgs{pass}} }
+func makePortCmd(port uint8) FTPCommand  { return FTPCommand{PORT, PortArgs{port}} }
+func makeTypeCmd(typeCode TypeCode, formatCode FormatCode, byteSize uint8) FTPCommand {
+	return FTPCommand{TYPE, TypeArgs{typeCode, formatCode, byteSize}}
+}
+func makeModeCmd(code ModeCode) FTPCommand      { return FTPCommand{MODE, ModeArgs{code}} }
+func makeStruCmd(code StructureCode) FTPCommand { return FTPCommand{STRU, StructureArgs{code}} }
+func makeRetrCmd(path string) FTPCommand        { return FTPCommand{RETR, RetrArgs{path}} }
+func makeStorCmd(path string) FTPCommand        { return FTPCommand{STOR, StorArgs{path}} }
