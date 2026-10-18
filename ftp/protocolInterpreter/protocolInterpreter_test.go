@@ -55,3 +55,38 @@ func TestParseCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestParseCommandExceptionCases(t *testing.T) {
+	var testCases = []struct {
+		parseFunc  func(*FTPCommand, []string) ([]string, error)
+		inputWords []string
+		inputCmd   FTPCommand
+		caseName   string
+	}{
+		{parseUser, []string{}, cmdMapping["USER"], "USER empty"},
+		{parsePass, []string{}, cmdMapping["PASS"], "PASS empty"},
+		{parsePort, []string{}, cmdMapping["PORT"], "PORT empty"},
+		{parsePort, []string{"uint8?"}, cmdMapping["PORT"], "PORT fail uint8 parse"},
+		{parseType, []string{}, cmdMapping["TYPE"], "TYPE empty"},
+		{parseType, []string{"WALNUT"}, cmdMapping["TYPE"], "TYPE unrecognized type"},
+		{parseType, []string{"A"}, cmdMapping["TYPE"], "TYPE A missing arg"},
+		{parseType, []string{"A", "Z"}, cmdMapping["TYPE"], "TYPE A unrecognized format"},
+		{parseType, []string{"E"}, cmdMapping["TYPE"], "TYPE E missing arg"},
+		{parseType, []string{"E", "D"}, cmdMapping["TYPE"], "TYPE E unrecognized format"},
+		{parseType, []string{"L"}, cmdMapping["TYPE"], "TYPE L missing arg"},
+		{parseType, []string{"L", "WORD"}, cmdMapping["TYPE"], "TYPE L fail uint8 parse"},
+		{parseMode, []string{}, cmdMapping["MODE"], "MODE empty"},
+		{parseMode, []string{"R"}, cmdMapping["MODE"], "MODE unrecognized mode"},
+		{parseStru, []string{}, cmdMapping["STRU"], "STRU empty"},
+		{parseStru, []string{"W"}, cmdMapping["STRU"], "STRU unrecognized mode"},
+		{parseRetr, []string{}, cmdMapping["RETR"], "RETR empty"},
+		{parseStor, []string{}, cmdMapping["STOR"], "STOR empty"},
+	}
+
+	for _, tc := range testCases {
+		actual, err := tc.parseFunc(&tc.inputCmd, tc.inputWords)
+		if err == nil {
+			t.Fatalf("%s case: expected failure, found %v with leftover words %v", tc.caseName, tc.inputCmd, actual)
+		}
+	}
+}
