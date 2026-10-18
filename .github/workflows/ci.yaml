@@ -1,8 +1,9 @@
 name: FTPGo CI
 
 on:
-  push:
   pull_request:
+    # only run when PR is first opened, and each time its updated
+    types: [opened, synchronize]
 
 permissions:
   contents: read
