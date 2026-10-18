@@ -13,6 +13,7 @@ import (
 type FTPTokenType uint
 
 /* COMMAND TOKENS */
+
 const (
 	USER FTPTokenType = iota // USER <username ::= string>
 	PASS                     // PASS <password ::= string>
@@ -109,10 +110,10 @@ func Interpret(msg string) ([]FTPCommand, error) {
 	return cmds, nil
 }
 
-// Convert a string slice into a slice of tokens to be parsed
+// Convert a string slice into a slice of commands for server/client to action
 func parse(words []string) ([]FTPCommand, error) {
-	tokens := make([]FTPCommand, 0, 64) // FTPToken buffer
-	return parseLoop(words, tokens)     // pass buffer as reference slice
+	cmds := make([]FTPCommand, 0, 64) // FTPToken buffer
+	return parseLoop(words, cmds)     // pass buffer as reference slice
 }
 
 // Recursive helper for parsing word input
@@ -123,7 +124,7 @@ func parseLoop(words []string, tokens []FTPCommand) ([]FTPCommand, error) {
 	// parse another command
 	w := strings.ToUpper(words[0])
 	cmd, isCmd := cmdMapping[w]
-	if !isCmd { // lex should always start w/ a command!
+	if !isCmd { // parse should always start w/ a command!
 		return tokens,
 			fmt.Errorf(
 				"expected an FTP command, found argument '%s'",
@@ -218,6 +219,7 @@ func parseType(cmd *FTPCommand, words []string) ([]string, error) {
 	switch args.Code {
 	case IMAGE:
 		args.Format = NONE
+		args.ByteSize = 0
 		cmd.Args = args
 		return words[1:], nil
 	case LOCAL:
@@ -232,6 +234,7 @@ func parseType(cmd *FTPCommand, words []string) ([]string, error) {
 			return words, fmt.Errorf(formatString, words[1])
 		}
 		args.ByteSize = uint8(byteSize)
+		cmd.Args = args
 		return words[2:], nil
 	default:
 		if len(words) < 2 {
@@ -249,6 +252,7 @@ func parseType(cmd *FTPCommand, words []string) ([]string, error) {
 		default:
 			return words, fmt.Errorf("expected type code, found '%s'", code)
 		}
+		args.ByteSize = 0
 		cmd.Args = args
 		return words[2:], nil
 	}
