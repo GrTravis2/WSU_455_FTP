@@ -6,6 +6,7 @@ package protocolinterpreter
 import (
 	"fmt"
 	"log"
+	"net/netip"
 	"strconv"
 	"strings"
 )
@@ -66,7 +67,10 @@ type FTPCommand struct {
 
 type UserArgs struct{ Username string }
 type PassArgs struct{ Pasword string }
-type PortArgs struct{ PortNum uint8 }
+type PortArgs struct {
+	Ip   netip.Addr
+	Port uint16
+}
 type RetrArgs struct{ Path string }
 type StorArgs struct{ Path string }
 
@@ -81,6 +85,12 @@ const (
 	LOCAL  TypeCode = 'L'
 )
 
+type TypeArgs struct {
+	Code     TypeCode
+	Format   FormatCode
+	ByteSize uint8 // logical byte size, only relevant if Format is LOCAL
+}
+
 type ModeCode byte
 
 const (
@@ -88,6 +98,8 @@ const (
 	BLOCK      ModeCode = 'B'
 	COMPRESSED ModeCode = 'C'
 )
+
+type ModeArgs struct{ Code ModeCode }
 
 type FormatCode byte
 
@@ -98,6 +110,8 @@ const (
 	NONE     FormatCode = '\x00' // IMAGE has not format type, use NULL
 )
 
+type FormArgs struct{ Code FormatCode }
+
 type StructureCode byte
 
 const (
@@ -106,16 +120,9 @@ const (
 	PAGE   StructureCode = 'P'
 )
 
-type TypeArgs struct {
-	Code     TypeCode
-	Format   FormatCode
-	ByteSize uint8 // logical byte size, only relevant if Format is LOCAL
-}
-type ModeArgs struct{ Code ModeCode }
-type FormArgs struct{ Code FormatCode }
 type StructureArgs struct{ Code StructureCode }
 
-var cmdMapping = map[string]FTPCommand{
+var CMDMAPPING = map[string]FTPCommand{
 	"USER": {USER, UserArgs{}},
 	"PASS": {PASS, PassArgs{}},
 	"QUIT": {QUIT, nil},
@@ -131,8 +138,9 @@ var cmdMapping = map[string]FTPCommand{
 // parse an FTP control message into FTP Commands
 func Interpret(msg string) ([]FTPCommand, error) {
 	// remove all <CRLF> and split on <SP>
-	cleaned := strings.TrimSpace(strings.ReplaceAll(msg, "\r\n", ""))
-	words := strings.Split(cleaned, " ")
+	// cleaned := strings.TrimSpace(strings.ReplaceAll(msg, "\r\n", ""))
+	// words := strings.Split(cleaned, " ")
+	words := strings.Split(strings.TrimSpace(msg), "\r\n")
 	cmds, err := parse(words)
 	if err != nil {
 		return []FTPCommand{}, err
@@ -143,225 +151,213 @@ func Interpret(msg string) ([]FTPCommand, error) {
 
 // Convert a string slice into a slice of commands for server/client to action
 func parse(words []string) ([]FTPCommand, error) {
-	cmds := make([]FTPCommand, 0, 64) // FTPToken buffer
-	return parseLoop(words, cmds)     // pass buffer as reference slice
+	cmds := make([]FTPCommand, 0, 64) // FTPCommand buffer
+	for _, word := range words {
+		// split word into cmd type and args
+		token, args, sepFound := strings.Cut(word, " ")
+		if !sepFound {
+			return []FTPCommand{},
+				fmt.Errorf("unable to parse command '%s'", word)
+		}
+
+		// match cmd type to command object
+		t := strings.ToUpper(token)
+		cmd, isCmd := CMDMAPPING[t]
+		if !isCmd { // parse should always start w/ a command!
+			return cmds,
+				fmt.Errorf(
+					"expected an FTP command, found '%s'",
+					t,
+				)
+		}
+		// if parsing a command with args
+		if cmd.Token != QUIT && cmd.Token != NOOP {
+			if len(args) == 0 {
+				return []FTPCommand{}, missingRequiredArgError(cmd.Token, args)
+			}
+			// then call parsing function to get parsed command obj
+			cmd, err := parseArgs(cmd.Token, args)
+			if err != nil {
+				fmtString := "unable to parse command args '%s': %v"
+				return []FTPCommand{}, fmt.Errorf(fmtString, args, err.Error())
+			}
+			cmds = append(cmds, cmd)
+		}
+	}
+
+	return cmds, nil
 }
 
-// Recursive helper for parsing word input
-func parseLoop(words []string, tokens []FTPCommand) ([]FTPCommand, error) {
-	if len(words) == 0 { // base case
-		return tokens, nil
-	}
-	// parse another command
-	w := strings.ToUpper(words[0])
-	cmd, isCmd := cmdMapping[w]
-	if !isCmd { // parse should always start w/ a command!
-		return tokens,
-			fmt.Errorf(
-				"expected an FTP command, found argument '%s'",
-				w,
-			)
-	}
-	updated_words, err := popArgs(&cmd, words[1:])
-	if err != nil {
-		return tokens, err
-	}
-	return parseLoop(updated_words, append(tokens, cmd))
-}
-
-func popArgs(cmd *FTPCommand, words []string) ([]string, error) {
-	switch cmd.Token {
+func parseArgs(token FTPTokenType, args string) (FTPCommand, error) {
+	switch token {
 	case USER:
-		return parseUser(cmd, words)
+		return parseUser(args)
 	case PASS:
-		return parsePass(cmd, words)
+		return parsePass(args)
 	case PORT:
-		return parsePort(cmd, words)
+		return parsePort(args)
 	case TYPE:
-		return parseType(cmd, words)
+		return parseType(args)
 	case MODE:
-		return parseMode(cmd, words)
+		return parseMode(args)
 	case STRU:
-		return parseStru(cmd, words)
+		return parseStru(args)
 	case RETR:
-		return parseRetr(cmd, words)
+		return parseRetr(args)
 	case STOR:
-		return parseStor(cmd, words)
-	case QUIT, NOOP: // no args commands, do nothing return unchanged slice
-		return words, nil
+		return parseStor(args)
 	default:
 		// we check earlier that command is valid, if we get here
 		// panic and report so we can see how this could have happened!
-		panic(fmt.Sprintf("unexpected command found '%v'", cmd.Token))
+		panic(fmt.Sprintf("unexpected command found '%v'", token))
 	}
 }
 
-func parseUser(cmd *FTPCommand, words []string) ([]string, error) {
-	if len(words) == 0 {
-		return words, missingRequiredArgError(cmd.Token)
-	}
-	args, _ := cmd.Args.(UserArgs)
-	args.Username = words[0]
-	cmd.Args = args
-	return words[1:], nil
+func parseUser(args string) (FTPCommand, error) {
+	return FTPCommand{USER, UserArgs{args}}, nil
 }
 
-func parsePass(cmd *FTPCommand, words []string) ([]string, error) {
-	if len(words) == 0 {
-		return words, missingRequiredArgError(cmd.Token)
-	}
-	args, _ := cmd.Args.(PassArgs)
-	args.Pasword = words[0]
-	cmd.Args = args
-	return words[1:], nil
+func parsePass(args string) (FTPCommand, error) {
+	return FTPCommand{PASS, PassArgs{args}}, nil
 }
 
-func parsePort(cmd *FTPCommand, words []string) ([]string, error) {
-	if len(words) == 0 {
-		return words, missingRequiredArgError(cmd.Token)
+func parsePort(args string) (FTPCommand, error) {
+	fields := strings.Split(args, ",")
+	if len(fields) != 6 {
+		return FTPCommand{}, missingRequiredArgError(PORT, args)
 	}
-	args, _ := cmd.Args.(PortArgs)
-	portNum, err := strconv.ParseUint(words[0], 10, 8)
-	if err != nil {
-		return words, fmt.Errorf("unable to parse '%s' into uint8", words[0])
+	addr := strings.Join(fields[:4], ".")
+	ip, err := netip.ParseAddr(addr)
+	if err != nil || !ip.Is4() {
+		s := "unable to parse '%s' into IPv4: %v"
+		return FTPCommand{}, fmt.Errorf(s, addr, err.Error())
 	}
-	if portNum == 0 {
-		return words, fmt.Errorf("cannot have port number %d", portNum)
-	}
-	args.PortNum = uint8(portNum)
-	cmd.Args = args
-	return words[1:], nil
-}
-
-func parseType(cmd *FTPCommand, words []string) ([]string, error) {
-	if len(words) == 0 {
-		return words, missingRequiredArgError(cmd.Token)
-	}
-	args, _ := cmd.Args.(TypeArgs)
-	switch words[0] {
-	case "A":
-		args.Code = ASCII
-	case "E":
-		args.Code = EBCDIC
-	case "I":
-		args.Code = IMAGE
-	case "L":
-		args.Code = LOCAL
-	default:
-		return words, fmt.Errorf("expected type code, found '%s'", words[0])
-	}
-	switch args.Code {
-	case IMAGE:
-		args.Format = NONE
-		args.ByteSize = 0
-		cmd.Args = args
-		return words[1:], nil
-	case LOCAL:
-		if len(words) < 2 {
-			formatString := "missing required byte size args for '%v' command"
-			return words, fmt.Errorf(formatString, cmd.Token)
+	var uints [2]uint8
+	for i, s := range fields[4:] {
+		num, err := strconv.ParseUint(s, 10, 8)
+		if err != nil {
+			fmtString := "unable to parse '%s' into uint8"
+			return FTPCommand{}, fmt.Errorf(fmtString, s)
 		}
-		args.Format = NONE
-		byteSize, err := strconv.ParseUint(words[1], 10, 8)
+		uints[i] = uint8(num)
+	}
+	port := (uint16(uints[0]) << 8) + uint16(uints[1])
+	if port == 0 {
+		return FTPCommand{}, fmt.Errorf("cannot have port number %d", port)
+	}
+	return FTPCommand{PORT, PortArgs{ip, port}}, nil
+}
+
+func parseType(args string) (FTPCommand, error) {
+	chars := strings.Split(args, " ")
+
+	var code TypeCode
+	var format FormatCode
+	var byteSize uint8 = 0
+	switch strings.ToUpper(chars[0]) {
+	case "A":
+		code = ASCII
+	case "E":
+		code = EBCDIC
+	case "I":
+		code = IMAGE
+	case "L":
+		code = LOCAL
+	default:
+		return FTPCommand{}, fmt.Errorf("expected type code, found '%s'", chars[0])
+	}
+	switch code {
+	case IMAGE:
+		format = NONE
+		byteSize = 0
+	case LOCAL:
+		if len(chars) < 2 {
+			formatString := "missing required byte size args for '%v' command"
+			return FTPCommand{}, fmt.Errorf(formatString, LOCAL)
+		}
+		format = NONE
+		size, err := strconv.ParseUint(chars[1], 10, 8)
 		if err != nil {
 			formatString := "unable to parse byte size '%v' into uint8"
-			return words, fmt.Errorf(formatString, words[1])
+			return FTPCommand{}, fmt.Errorf(formatString, chars[1])
 		}
-		if byteSize == 0 {
-			return words, fmt.Errorf("cannot have byte size of %d", byteSize)
+		if size == 0 {
+			return FTPCommand{}, fmt.Errorf("cannot have byte size of %d", size)
 		}
-		args.ByteSize = uint8(byteSize)
-		cmd.Args = args
-		return words[2:], nil
-	default:
-		if len(words) < 2 {
-			formatStr := "missing required format code arg for '%v' command"
-			return words, fmt.Errorf(formatStr, cmd.Token)
+		byteSize = uint8(size)
+	case ASCII, EBCDIC:
+		if len(chars) == 1 { // no format code, default is NONPRINT
+			format = NONPRINT
+		} else {
+			switch strings.ToUpper(chars[1]) {
+			case "N":
+				format = NONPRINT
+			case "T":
+				format = TELNET
+			case "C":
+				format = CARRIAGE
+			default:
+				return FTPCommand{}, fmt.Errorf("expected format code, found '%v'", code)
+			}
 		}
-		code := words[1]
-		switch code {
-		case "N":
-			args.Format = NONPRINT
-		case "T":
-			args.Format = TELNET
-		case "C":
-			args.Format = CARRIAGE
-		default:
-			return words, fmt.Errorf("expected type code, found '%s'", code)
-		}
-		args.ByteSize = 0
-		cmd.Args = args
-		return words[2:], nil
 	}
+	return FTPCommand{TYPE, TypeArgs{code, format, byteSize}}, nil
 }
 
-func parseMode(cmd *FTPCommand, words []string) ([]string, error) {
-	if len(words) == 0 {
-		return words, missingRequiredArgError(cmd.Token)
-	}
-	args, _ := cmd.Args.(ModeArgs)
-	switch words[0] {
+func parseMode(args string) (FTPCommand, error) {
+	var code ModeCode
+	switch strings.ToUpper(args) {
 	case "S":
-		args.Code = STREAM
+		code = STREAM
 	case "B":
-		args.Code = BLOCK
+		code = BLOCK
 	case "C":
-		args.Code = COMPRESSED
+		code = COMPRESSED
 	default:
-		return words, fmt.Errorf("exected mode code, found '%s'", words[0])
+		return FTPCommand{}, fmt.Errorf("exected mode code, found '%s'", args)
 	}
-	cmd.Args = args
-	return words[1:], nil
+	return FTPCommand{MODE, ModeArgs{code}}, nil
 }
 
-func parseStru(cmd *FTPCommand, words []string) ([]string, error) {
-	if len(words) == 0 {
-		return words, missingRequiredArgError(cmd.Token)
-	}
-	args, _ := cmd.Args.(StructureArgs)
-	switch words[0] {
+func parseStru(args string) (FTPCommand, error) {
+	var code StructureCode
+	switch strings.ToUpper(args) {
 	case "F":
-		args.Code = FILE
+		code = FILE
 	case "R":
-		args.Code = RECORD
+		code = RECORD
 	case "P":
-		args.Code = PAGE
+		code = PAGE
 	default:
-		return words, fmt.Errorf("exected mode code, found '%s'", words[0])
+		return FTPCommand{}, fmt.Errorf("exected mode code, found '%s'", args)
 	}
-	cmd.Args = args
-	return words[1:], nil
+	return FTPCommand{STRU, StructureArgs{code}}, nil
 }
 
-func parseRetr(cmd *FTPCommand, words []string) ([]string, error) {
-	if len(words) == 0 {
-		return words, missingRequiredArgError(cmd.Token)
-	}
-	args, _ := cmd.Args.(RetrArgs)
-	args.Path = words[0]
-	cmd.Args = args
-	return words[1:], nil
+func parseRetr(args string) (FTPCommand, error) {
+	return FTPCommand{RETR, RetrArgs{args}}, nil
 }
 
-func parseStor(cmd *FTPCommand, words []string) ([]string, error) {
-	if len(words) == 0 {
-		return words, missingRequiredArgError(cmd.Token)
-	}
-	args, _ := cmd.Args.(StorArgs)
-	args.Path = words[0]
-	cmd.Args = args
-	return words[1:], nil
+func parseStor(args string) (FTPCommand, error) {
+	return FTPCommand{STOR, StorArgs{args}}, nil
 }
 
-func missingRequiredArgError(token FTPTokenType) error {
-	return fmt.Errorf("command '%v' missing required arg", token)
+func missingRequiredArgError(token FTPTokenType, args string) error {
+	fmtString := "command '%v' missing required arg, found args '%s'"
+	return fmt.Errorf(fmtString, token, args)
 }
 
 /* Private helpers for creating FTPCommands, it will help keep things more concise for testing */
 
 func makeUserCmd(user string) FTPCommand { return FTPCommand{USER, UserArgs{user}} }
 func makePassCmd(pass string) FTPCommand { return FTPCommand{PASS, PassArgs{pass}} }
-func makePortCmd(port uint8) FTPCommand  { return FTPCommand{PORT, PortArgs{port}} }
+func makePortCmd(ip string, port uint16) FTPCommand {
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		log.Panicf("unable to parse ip addr '%s' into IPv4", ip)
+	}
+	return FTPCommand{PORT, PortArgs{addr, port}}
+}
 func makeTypeCmd(typeCode TypeCode, formatCode FormatCode, byteSize uint8) FTPCommand {
 	return FTPCommand{TYPE, TypeArgs{typeCode, formatCode, byteSize}}
 }
