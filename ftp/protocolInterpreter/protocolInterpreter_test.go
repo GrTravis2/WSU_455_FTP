@@ -107,6 +107,7 @@ func TestInterpret(t *testing.T) {
 		// Individual command parsing cases
 		{"USER GAVIN\r\n", []FTPCommand{makeUserCmd("GAVIN")}, "USER basic"},
 		{"PASS GAVIN\r\n", []FTPCommand{makePassCmd("GAVIN")}, "PASS basic"},
+		{"QUIT\r\n", []FTPCommand{makeQuitCmd()}, "QUIT basic"},
 		{"PORT 1,1,1,1,000,123\r\n", []FTPCommand{makePortCmd("1.1.1.1", 123)}, "PORT basic"},
 		{"TYPE A N\r\n", []FTPCommand{makeTypeCmd('A', 'N', 0)}, "TYPE A N basic"},
 		{"TYPE A T\r\n", []FTPCommand{makeTypeCmd('A', 'T', 0)}, "TYPE A T basic"},
@@ -125,6 +126,7 @@ func TestInterpret(t *testing.T) {
 		{"RETR ~/Downloads/cool_file\r\n", []FTPCommand{makeRetrCmd("~/Downloads/cool_file")}, "RETR basic"},
 		{"STOR ~/Downloads/cool_file\r\n", []FTPCommand{makeStorCmd("~/Downloads/cool_file")}, "STOR basic"},
 		{"UsEr GAVIN\r\n", []FTPCommand{makeUserCmd("GAVIN")}, "Normalize command case"},
+		{"NOOP\r\n", []FTPCommand{makeNOOPCmd()}, "NOOP basic"},
 
 		// More complicated strings to parse
 		{

@@ -137,10 +137,7 @@ var CMDMAPPING = map[string]FTPCommand{
 
 // parse an FTP control message into FTP Commands
 func Interpret(msg string) ([]FTPCommand, error) {
-	// remove all <CRLF> and split on <SP>
-	// cleaned := strings.TrimSpace(strings.ReplaceAll(msg, "\r\n", ""))
-	// words := strings.Split(cleaned, " ")
-	words := strings.Split(strings.TrimSpace(msg), "\r\n")
+	words := strings.Split(strings.TrimSuffix(msg, "\r\n"), "\r\n")
 	cmds, err := parse(words)
 	if err != nil {
 		return []FTPCommand{}, err
@@ -154,11 +151,11 @@ func parse(words []string) ([]FTPCommand, error) {
 	cmds := make([]FTPCommand, 0, 64) // FTPCommand buffer
 	for _, word := range words {
 		// split word into cmd type and args
-		token, args, sepFound := strings.Cut(word, " ")
-		if !sepFound {
-			return []FTPCommand{},
-				fmt.Errorf("unable to parse command '%s'", word)
-		}
+		token, args, _ := strings.Cut(word, " ")
+		// if !sepFound {
+		// 	return []FTPCommand{},
+		// 		fmt.Errorf("unable to parse command '%s'", word)
+		// }
 
 		// match cmd type to command object
 		t := strings.ToUpper(token)
@@ -171,18 +168,22 @@ func parse(words []string) ([]FTPCommand, error) {
 				)
 		}
 		// if parsing a command with args
+		var parsedCmd FTPCommand
+		var err error
 		if cmd.Token != QUIT && cmd.Token != NOOP {
 			if len(args) == 0 {
 				return []FTPCommand{}, missingRequiredArgError(cmd.Token, args)
 			}
 			// then call parsing function to get parsed command obj
-			cmd, err := parseArgs(cmd.Token, args)
+			parsedCmd, err = parseArgs(cmd.Token, args)
 			if err != nil {
 				fmtString := "unable to parse command args '%s': %v"
 				return []FTPCommand{}, fmt.Errorf(fmtString, args, err.Error())
 			}
-			cmds = append(cmds, cmd)
+		} else { // command w/ no args to parse
+			parsedCmd = FTPCommand{cmd.Token, nil}
 		}
+		cmds = append(cmds, parsedCmd)
 	}
 
 	return cmds, nil
@@ -351,6 +352,7 @@ func missingRequiredArgError(token FTPTokenType, args string) error {
 
 func makeUserCmd(user string) FTPCommand { return FTPCommand{USER, UserArgs{user}} }
 func makePassCmd(pass string) FTPCommand { return FTPCommand{PASS, PassArgs{pass}} }
+func makeQuitCmd() FTPCommand            { return FTPCommand{QUIT, nil} }
 func makePortCmd(ip string, port uint16) FTPCommand {
 	addr, err := netip.ParseAddr(ip)
 	if err != nil {
@@ -365,3 +367,4 @@ func makeModeCmd(code ModeCode) FTPCommand      { return FTPCommand{MODE, ModeAr
 func makeStruCmd(code StructureCode) FTPCommand { return FTPCommand{STRU, StructureArgs{code}} }
 func makeRetrCmd(path string) FTPCommand        { return FTPCommand{RETR, RetrArgs{path}} }
 func makeStorCmd(path string) FTPCommand        { return FTPCommand{STOR, StorArgs{path}} }
+func makeNOOPCmd() FTPCommand                   { return FTPCommand{NOOP, nil} }
