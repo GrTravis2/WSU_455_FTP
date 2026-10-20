@@ -16,6 +16,7 @@ func TestParseCommand(t *testing.T) {
 		{parseUser, "Gavin BANANA", makeUserCmd("Gavin BANANA"), "USER args with space ok"},
 		{parsePass, "secret", makePassCmd("secret"), "PASS"},
 		{parsePass, "secret FUSCHIA", makePassCmd("secret FUSCHIA"), "PASS extra cmd"},
+		{parsePass, "secret FUSCHIA ", makePassCmd("secret FUSCHIA "), "PASS extra cmd with trailing whitespace"},
 		{parsePort, "1,1,1,1,0,1", makePortCmd("1.1.1.1", 0x0001), "PORT lower bound"},
 		{parsePort, "1,1,1,1,255,255", makePortCmd("1.1.1.1", 0xFFFF), "PORT upper bound"},
 		{parseType, "A N", makeTypeCmd('A', 'N', 0), "TYPE A N"},

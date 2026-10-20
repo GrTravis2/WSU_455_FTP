@@ -152,10 +152,6 @@ func parse(words []string) ([]FTPCommand, error) {
 	for _, word := range words {
 		// split word into cmd type and args
 		token, args, _ := strings.Cut(word, " ")
-		// if !sepFound {
-		// 	return []FTPCommand{},
-		// 		fmt.Errorf("unable to parse command '%s'", word)
-		// }
 
 		// match cmd type to command object
 		t := strings.ToUpper(token)
