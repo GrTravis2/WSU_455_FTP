@@ -265,10 +265,14 @@ func parseType(args string) (FTPCommand, error) {
 	}
 	switch code {
 	case IMAGE:
+		if len(chars) != 1 {
+			formatString := "IMAGE type args not in correct format, expected just 'I', found '%v'"
+			return FTPCommand{}, fmt.Errorf(formatString, chars)
+		}
 		format = NONE
 		byteSize = 0
 	case LOCAL:
-		if len(chars) < 2 {
+		if len(chars) != 2 {
 			formatString := "missing required byte size args for '%v' command"
 			return FTPCommand{}, fmt.Errorf(formatString, LOCAL)
 		}
@@ -286,6 +290,10 @@ func parseType(args string) (FTPCommand, error) {
 		if len(chars) == 1 { // no format code, default is NONPRINT
 			format = NONPRINT
 		} else {
+			if len(chars) != 2 {
+				formatString := "type args not in correct format, expected just '<type-code> <form-code>', found '%v'"
+				return FTPCommand{}, fmt.Errorf(formatString, chars)
+			}
 			switch strings.ToUpper(chars[1]) {
 			case "N":
 				format = NONPRINT
