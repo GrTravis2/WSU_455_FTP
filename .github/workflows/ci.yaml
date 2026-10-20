@@ -1,0 +1,25 @@
+name: FTPGo CI
+
+on:
+  pull_request:
+    # only run when PR is first opened, and each time its updated
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+      - name: setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: build project
+        run: go build -o "$RUNNER_TEMP/main" ./main.go
+      - name: run all tests
+        run: go test ./...
