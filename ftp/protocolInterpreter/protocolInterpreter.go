@@ -137,6 +137,9 @@ var CMDMAPPING = map[string]FTPCommand{
 
 // parse an FTP control message into FTP Commands
 func Interpret(msg string) ([]FTPCommand, error) {
+	if !strings.HasSuffix(msg, "\r\n") {
+		return []FTPCommand{}, fmt.Errorf("FTP command string must end with '\r\n', found %s", msg)
+	}
 	words := strings.Split(strings.TrimSuffix(msg, "\r\n"), "\r\n")
 	cmds, err := parse(words)
 	if err != nil {
@@ -226,8 +229,8 @@ func parsePort(args string) (FTPCommand, error) {
 	addr := strings.Join(fields[:4], ".")
 	ip, err := netip.ParseAddr(addr)
 	if err != nil || !ip.Is4() {
-		s := "unable to parse '%s' into IPv4: %v"
-		return FTPCommand{}, fmt.Errorf(s, addr, err.Error())
+		s := "unable to parse '%s' into IPv4"
+		return FTPCommand{}, fmt.Errorf(s, addr)
 	}
 	var uints [2]uint8
 	for i, s := range fields[4:] {

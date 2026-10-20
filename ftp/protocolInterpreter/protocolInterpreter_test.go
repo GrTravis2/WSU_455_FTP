@@ -163,9 +163,10 @@ func TestInterpretExceptionCases(t *testing.T) {
 	}{
 		{"USERGAVIN\r\n", "Missing space"},
 		{"USER\r\n", "Missing args"},
-		// {"USER GAVIN", "Missing <CRLF>"}, // this fails, do we actually care?
+		{"USER GAVIN", "Missing <CRLF>"},
 		{"", "Empty input"},
 		{"TYPE MODE S\r\n", "Missing arg"},
+		{"PORT ::ffff:192,0,2,1,1,1\r\n", "sneaky IPv6 injection"},
 	}
 
 	for _, tc := range testCases {
@@ -173,6 +174,5 @@ func TestInterpretExceptionCases(t *testing.T) {
 		if err == nil { // why didnt it fail???
 			t.Fatalf("%s case: expected failure, found %v", tc.caseName, actual)
 		}
-		// log.Fatal(err)
 	}
 }
