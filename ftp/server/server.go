@@ -238,5 +238,5 @@ type FTPReply struct {
 }
 
 func (reply *FTPReply) ToString() string {
-	return fmt.Sprintf("%d%d%d %s\n\n", reply.Code[0], reply.Code[1], reply.Code[2], reply.Msg)
+	return fmt.Sprintf("%d%d%d %s%s", reply.Code[0], reply.Code[1], reply.Code[2], reply.Msg, nvtascii.CRLF)
 }
