@@ -105,9 +105,18 @@ func controlSessionHandler(
 	mutex *sync.Mutex,
 	active_sessions map[net.Conn]struct{},
 ) {
-	defer openConn.Close()
 	defer wg.Done()
+	defer func() {
+		openConn.Close()
+		mutex.Lock()
+		delete(active_sessions, openConn)
+		mutex.Unlock()
+	}()
 	// send server greeting here to kick off control session (clients are expecting it)
+	if err := sendReply(openConn, FTPReply{[3]byte{2, 2, 0}, "Service ready"}); err != nil {
+		fmt.Fprintf(os.Stderr, "Unable to send greeting: %v", err)
+		return
+	}
 
 	reader := bufio.NewReader(openConn)
 
@@ -122,10 +131,6 @@ func controlSessionHandler(
 			} else {
 				fmt.Fprintf(os.Stderr, "Transmission failed: %v", err)
 			}
-			// remove from active sessions before returning
-			mutex.Lock()
-			delete(active_sessions, openConn)
-			mutex.Unlock()
 			return
 		}
 		cmds, err := protocolinterpreter.Interpret(msg)
@@ -138,14 +143,33 @@ func controlSessionHandler(
 			reply, err := session.RouteHandler(&c)
 			if err != nil { // handle err during cmd handling
 				fmt.Fprintf(os.Stderr, "Failed to handle command %v: %v", c.Token, err)
+				return
 			}
-			b, err := nvtascii.FromString(reply.ToString())
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Unable to convert string to NVT ASCII: %v", err)
+			if err := sendReply(openConn, reply); err != nil {
+				fmt.Fprintf(os.Stderr, "Unable to send reply: %v", err)
+				return
 			}
-			openConn.Write(b)
+			if session.Done {
+				return
+			}
 		}
 	}
+}
+
+// format and send a reply over the control connection
+func sendReply(conn net.Conn, reply FTPReply) error {
+	b, err := nvtascii.FromString(reply.ToString())
+	if err != nil {
+		return err
+	}
+	n, err := conn.Write(b)
+	if err != nil {
+		return err
+	}
+	if n != len(b) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 // Command Handlers
@@ -156,29 +180,33 @@ func (session *controlSession) RouteHandler(cmd *protocolinterpreter.FTPCommand)
 	var err error = nil
 	switch cmd.Token {
 	case protocolinterpreter.USER:
-		session.UserHandler(cmd)
+		reply, err = session.UserHandler(cmd)
 	case protocolinterpreter.PASS:
-		session.PassHandler(cmd)
+		reply, err = session.PassHandler(cmd)
 	case protocolinterpreter.QUIT:
-		session.QuitHandler(cmd)
+		reply, err = session.QuitHandler(cmd)
 	case protocolinterpreter.PORT:
-		session.PortHandler(cmd)
+		reply, err = session.PortHandler(cmd)
 	case protocolinterpreter.TYPE:
-		session.TypeHandler(cmd)
+		reply, err = session.TypeHandler(cmd)
 	case protocolinterpreter.MODE:
-		session.ModeHandler(cmd)
+		reply, err = session.ModeHandler(cmd)
 	case protocolinterpreter.STRU:
-		session.StructureHandler(cmd)
+		reply, err = session.StructureHandler(cmd)
 	case protocolinterpreter.RETR:
-		session.RetrieveHandler(cmd)
+		reply, err = session.RetrieveHandler(cmd)
 	case protocolinterpreter.STOR:
-		session.StoreHandler(cmd)
+		reply, err = session.StoreHandler(cmd)
 	case protocolinterpreter.NOOP:
-		session.NOOPHandler(cmd)
+		reply, err = session.NOOPHandler(cmd)
 	default:
-		fmt.Fprintf(os.Stderr, "Unable to handle unrecognized command: %v", cmd.Token)
+		return FTPReply{[3]byte{5, 0, 2}, "Command not implemented"}, nil
 	}
 
+	// handlers which are still stubs must not send a 000 reply
+	if err == nil && reply.Code == [3]byte{} {
+		reply = FTPReply{[3]byte{5, 0, 2}, "Command not implemented"}
+	}
 	return reply, err
 }
 
@@ -194,7 +222,8 @@ func (session *controlSession) PassHandler(cmd *protocolinterpreter.FTPCommand) 
 
 // handle QUIT command
 func (session *controlSession) QuitHandler(cmd *protocolinterpreter.FTPCommand) (FTPReply, error) {
-	return FTPReply{}, nil
+	session.Done = true
+	return FTPReply{[3]byte{2, 2, 1}, "Service closing control connection"}, nil
 }
 
 // handle PORT command
@@ -229,7 +258,7 @@ func (session *controlSession) StoreHandler(cmd *protocolinterpreter.FTPCommand)
 
 // handle NOOP command
 func (session *controlSession) NOOPHandler(cmd *protocolinterpreter.FTPCommand) (FTPReply, error) {
-	return FTPReply{}, nil
+	return FTPReply{[3]byte{2, 0, 0}, "Command okay"}, nil
 }
 
 type FTPReply struct {
