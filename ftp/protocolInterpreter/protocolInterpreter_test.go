@@ -1,6 +1,7 @@
 package protocolinterpreter
 
 import (
+	"errors"
 	"slices"
 	"testing"
 )
@@ -65,6 +66,59 @@ func TestParseCommand(t *testing.T) {
 		if actualCmd != tc.expectedCmd { // expected command state wron
 			t.Fatalf("%s case: found cmd %#v, expected cmd %#v", tc.caseName, actualCmd, tc.expectedCmd)
 		}
+	}
+}
+
+func TestInterpretErrorClassification(t *testing.T) {
+	var testCases = []struct {
+		input string
+		err   error
+	}{
+		{"UNKNOWN\r\n", ErrInvalidCommand},
+		{"USERGAVIN\r\n", ErrInvalidCommand},
+		{"\r\n", ErrInvalidCommand},
+		{"NOOP\n", ErrInvalidCommand},
+		{"", ErrInvalidCommand},
+		{"TYPE X\r\n", ErrInvalidArguments},
+		{"TYPE A X\r\n", ErrInvalidArguments},
+		{"TYPE I extra\r\n", ErrInvalidArguments},
+		{"TYPE L 0\r\n", ErrInvalidArguments},
+		{"MODE X\r\n", ErrInvalidArguments},
+		{"STRU X\r\n", ErrInvalidArguments},
+		{"PORT 1,2,3\r\n", ErrInvalidArguments},
+		{"PORT 256,0,0,1,1,1\r\n", ErrInvalidArguments},
+		{"PORT 127,0,0,1,256,1\r\n", ErrInvalidArguments},
+		{"PORT ::ffff:192,0,2,1,1,1\r\n", ErrInvalidArguments},
+		{"USER\r\n", ErrInvalidArguments},
+		{"PASS\r\n", ErrInvalidArguments},
+		{"PORT\r\n", ErrInvalidArguments},
+		{"TYPE\r\n", ErrInvalidArguments},
+		{"MODE\r\n", ErrInvalidArguments},
+		{"STRU\r\n", ErrInvalidArguments},
+		{"RETR\r\n", ErrInvalidArguments},
+		{"STOR\r\n", ErrInvalidArguments},
+		{"NOOP extra\r\n", ErrInvalidArguments},
+		{"QUIT extra\r\n", ErrInvalidArguments},
+		{"NOOP \r\n", ErrInvalidArguments},
+		{"QUIT \r\n", ErrInvalidArguments},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.input, func(t *testing.T) {
+			cmds, err := Interpret(tc.input)
+			if !errors.Is(err, tc.err) {
+				t.Fatalf("expected error %v, found %v", tc.err, err)
+			}
+			if len(cmds) != 0 {
+				t.Fatalf("invalid command returned commands: %#v", cmds)
+			}
+		})
+	}
+}
+
+func TestParseArgsUnexpectedCommand(t *testing.T) {
+	_, err := parseArgs(FTPTokenType(999), "")
+	if err == nil || errors.Is(err, ErrInvalidCommand) || errors.Is(err, ErrInvalidArguments) {
+		t.Fatalf("expected an internal error, found %v", err)
 	}
 }
 

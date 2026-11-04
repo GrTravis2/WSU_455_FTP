@@ -173,6 +173,9 @@ func TestControlSessionFailedWrite(t *testing.T) {
 		{"greeting", "", 1, false},
 		{"NOOP reply", "NOOP\r\n", 2, false},
 		{"QUIT reply", "QUIT\r\n", 2, false},
+		{"500 reply", "UNKNOWN\r\n", 2, false},
+		{"501 reply", "TYPE X\r\n", 2, false},
+		{"short error reply", "QUIT extra\r\n", 2, true},
 		{"short greeting", "", 1, true},
 		{"short reply", "NOOP\r\n", 2, true},
 	}
@@ -196,6 +199,56 @@ func TestControlSessionFailedWrite(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestControlSessionErrorRecovery(t *testing.T) {
+	conn, client := net.Pipe()
+	t.Cleanup(func() { client.Close() })
+	client.SetDeadline(time.Now().Add(3 * time.Second))
+	wait := startControlSession(t, conn, controlSession{})
+	reader := bufio.NewReader(client)
+	readControlReply(t, reader, "220 Service ready\r\n")
+
+	var testCases = []struct {
+		command string
+		reply   string
+	}{
+		{"UNKNOWN", "500 Syntax error, command unrecognized\r\n"},
+		{"TYPE X", "501 Syntax error in parameters or arguments\r\n"},
+		{"MODE X", "501 Syntax error in parameters or arguments\r\n"},
+		{"STRU X", "501 Syntax error in parameters or arguments\r\n"},
+		{"PORT 1,2,3", "501 Syntax error in parameters or arguments\r\n"},
+		{"USER", "501 Syntax error in parameters or arguments\r\n"},
+		{"NOOP extra", "501 Syntax error in parameters or arguments\r\n"},
+		{"QUIT extra", "501 Syntax error in parameters or arguments\r\n"},
+		{"USER alice", "502 Command not implemented\r\n"},
+		{"PASS secret", "502 Command not implemented\r\n"},
+		{"TYPE A", "502 Command not implemented\r\n"},
+		{"TYPE E N", "502 Command not implemented\r\n"},
+		{"TYPE I", "502 Command not implemented\r\n"},
+		{"TYPE L 8", "502 Command not implemented\r\n"},
+		{"MODE S", "502 Command not implemented\r\n"},
+		{"STRU F", "502 Command not implemented\r\n"},
+		{"PORT 127,0,0,1,195,80", "502 Command not implemented\r\n"},
+		{"RETR report.txt", "502 Command not implemented\r\n"},
+		{"STOR report.txt", "502 Command not implemented\r\n"},
+	}
+	for _, tc := range testCases {
+		// the next command must work even when both arrive in one write
+		if _, err := io.WriteString(client, tc.command+"\r\nNOOP\r\n"); err != nil {
+			t.Fatal(err)
+		}
+		readControlReply(t, reader, tc.reply)
+		readControlReply(t, reader, "200 Command okay\r\n")
+	}
+	if _, err := io.WriteString(client, "QUIT\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	readControlReply(t, reader, "221 Service closing control connection\r\n")
+	if b, err := reader.ReadByte(); err != io.EOF {
+		t.Fatalf("expected EOF after QUIT, found byte %q and error %v", b, err)
+	}
+	wait()
 }
 
 func TestControlSessionHandlers(t *testing.T) {

@@ -135,7 +135,21 @@ func controlSessionHandler(
 		}
 		cmds, err := protocolinterpreter.Interpret(msg)
 		if err != nil {
-			// handle parse failure -> send failure reply to client and try again?
+			var reply FTPReply
+			switch {
+			case errors.Is(err, protocolinterpreter.ErrInvalidCommand):
+				reply = FTPReply{[3]byte{5, 0, 0}, "Syntax error, command unrecognized"}
+			case errors.Is(err, protocolinterpreter.ErrInvalidArguments):
+				reply = FTPReply{[3]byte{5, 0, 1}, "Syntax error in parameters or arguments"}
+			default:
+				fmt.Fprintf(os.Stderr, "Unable to interpret command: %v", err)
+				return
+			}
+			if err := sendReply(openConn, reply); err != nil {
+				fmt.Fprintf(os.Stderr, "Unable to send error reply: %v", err)
+				return
+			}
+			continue
 		}
 
 		// for each parsed command, action it and then send reply back
