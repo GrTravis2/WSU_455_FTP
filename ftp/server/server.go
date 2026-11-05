@@ -113,7 +113,7 @@ func controlSessionHandler(
 		mutex.Unlock()
 	}()
 	// send server greeting here to kick off control session (clients are expecting it)
-	if err := sendReply(openConn, FTPReply{[3]byte{2, 2, 0}, "Service ready"}); err != nil {
+	if err := sendReply(openConn, makeFTPReply(220, "Service ready")); err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to send greeting: %v", err)
 		return
 	}
@@ -135,7 +135,21 @@ func controlSessionHandler(
 		}
 		cmds, err := protocolinterpreter.Interpret(msg)
 		if err != nil {
-			// handle parse failure -> send failure reply to client and try again?
+			var reply FTPReply
+			switch {
+			case errors.Is(err, protocolinterpreter.ErrInvalidCommand):
+				reply = makeFTPReply(500, "Syntax error, command unrecognized")
+			case errors.Is(err, protocolinterpreter.ErrInvalidArguments):
+				reply = makeFTPReply(501, "Syntax error in parameters or arguments")
+			default:
+				fmt.Fprintf(os.Stderr, "Unable to interpret command: %v", err)
+				return
+			}
+			if err := sendReply(openConn, reply); err != nil {
+				fmt.Fprintf(os.Stderr, "Unable to send error reply: %v", err)
+				return
+			}
+			continue
 		}
 
 		// for each parsed command, action it and then send reply back
@@ -200,12 +214,12 @@ func (session *controlSession) RouteHandler(cmd *protocolinterpreter.FTPCommand)
 	case protocolinterpreter.NOOP:
 		reply, err = session.NOOPHandler(cmd)
 	default:
-		return FTPReply{[3]byte{5, 0, 2}, "Command not implemented"}, nil
+		return makeFTPReply(502, "Command not implemented"), nil
 	}
 
 	// handlers which are still stubs must not send a 000 reply
 	if err == nil && reply.Code == [3]byte{} {
-		reply = FTPReply{[3]byte{5, 0, 2}, "Command not implemented"}
+		reply = makeFTPReply(502, "Command not implemented")
 	}
 	return reply, err
 }
@@ -223,7 +237,7 @@ func (session *controlSession) PassHandler(cmd *protocolinterpreter.FTPCommand) 
 // handle QUIT command
 func (session *controlSession) QuitHandler(cmd *protocolinterpreter.FTPCommand) (FTPReply, error) {
 	session.Done = true
-	return FTPReply{[3]byte{2, 2, 1}, "Service closing control connection"}, nil
+	return makeFTPReply(221, "Service closing control connection"), nil
 }
 
 // handle PORT command
@@ -258,7 +272,7 @@ func (session *controlSession) StoreHandler(cmd *protocolinterpreter.FTPCommand)
 
 // handle NOOP command
 func (session *controlSession) NOOPHandler(cmd *protocolinterpreter.FTPCommand) (FTPReply, error) {
-	return FTPReply{[3]byte{2, 0, 0}, "Command okay"}, nil
+	return makeFTPReply(200, "Command okay"), nil
 }
 
 type FTPReply struct {
@@ -268,4 +282,9 @@ type FTPReply struct {
 
 func (reply *FTPReply) ToString() string {
 	return fmt.Sprintf("%d%d%d %s%s", reply.Code[0], reply.Code[1], reply.Code[2], reply.Msg, nvtascii.CRLF)
+}
+
+// helper for creating FTP replies
+func makeFTPReply(code int, msg string) FTPReply {
+	return FTPReply{[3]byte{byte(code / 100), byte(code / 10 % 10), byte(code % 10)}, msg}
 }
