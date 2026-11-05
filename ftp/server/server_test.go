@@ -19,10 +19,12 @@ func TestFTPReplyToString(t *testing.T) {
 		expected string
 		caseName string
 	}{
-		{FTPReply{[3]byte{2, 2, 0}, "Service ready"}, "220 Service ready\r\n", "220 greeting"},
-		{FTPReply{[3]byte{2, 0, 0}, "Command okay"}, "200 Command okay\r\n", "200 command success"},
-		{FTPReply{[3]byte{2, 2, 1}, "Service closing control connection"}, "221 Service closing control connection\r\n", "221 connection closing"},
-		{FTPReply{[3]byte{5, 0, 0}, "Syntax error, command unrecognized"}, "500 Syntax error, command unrecognized\r\n", "500 error"},
+		{makeFTPReply(220, "Service ready"), "220 Service ready\r\n", "220 greeting"},
+		{makeFTPReply(200, "Command okay"), "200 Command okay\r\n", "200 command success"},
+		{makeFTPReply(221, "Service closing control connection"), "221 Service closing control connection\r\n", "221 connection closing"},
+		{makeFTPReply(500, "Syntax error, command unrecognized"), "500 Syntax error, command unrecognized\r\n", "500 error"},
+		{makeFTPReply(501, "Syntax error in parameters or arguments"), "501 Syntax error in parameters or arguments\r\n", "501 error"},
+		{makeFTPReply(502, "Command not implemented"), "502 Command not implemented\r\n", "502 error"},
 	}
 
 	for _, tc := range testCases {
