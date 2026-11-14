@@ -4,6 +4,7 @@
 package protocolinterpreter
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/netip"
@@ -135,10 +136,14 @@ var CMDMAPPING = map[string]FTPCommand{
 	"NOOP": {NOOP, nil},
 }
 
+// parse errors which the server can turn into FTP replies
+var ErrInvalidCommand = errors.New("invalid or unrecognized FTP command")
+var ErrInvalidArguments = errors.New("invalid FTP command arguments")
+
 // parse an FTP control message into FTP Commands
 func Interpret(msg string) ([]FTPCommand, error) {
 	if !strings.HasSuffix(msg, "\r\n") {
-		return []FTPCommand{}, fmt.Errorf("FTP command string must end with '\r\n', found %s", msg)
+		return []FTPCommand{}, fmt.Errorf("%w: FTP command string must end with CRLF", ErrInvalidCommand)
 	}
 	words := strings.Split(strings.TrimSuffix(msg, "\r\n"), "\r\n")
 	cmds, err := parse(words)
@@ -154,7 +159,7 @@ func parse(words []string) ([]FTPCommand, error) {
 	cmds := make([]FTPCommand, 0, 64) // FTPCommand buffer
 	for _, word := range words {
 		// split word into cmd type and args
-		token, args, _ := strings.Cut(word, " ")
+		token, args, hasArgs := strings.Cut(word, " ")
 
 		// match cmd type to command object
 		t := strings.ToUpper(token)
@@ -162,7 +167,8 @@ func parse(words []string) ([]FTPCommand, error) {
 		if !isCmd { // parse should always start w/ a command!
 			return cmds,
 				fmt.Errorf(
-					"expected an FTP command, found '%s'",
+					"%w: expected an FTP command, found '%s'",
+					ErrInvalidCommand,
 					t,
 				)
 		}
@@ -176,10 +182,12 @@ func parse(words []string) ([]FTPCommand, error) {
 			// then call parsing function to get parsed command obj
 			parsedCmd, err = parseArgs(cmd.Token, args)
 			if err != nil {
-				fmtString := "unable to parse command args '%s': %v"
-				return []FTPCommand{}, fmt.Errorf(fmtString, args, err.Error())
+				return []FTPCommand{}, fmt.Errorf("unable to parse %v command args: %w", cmd.Token, err)
 			}
 		} else { // command w/ no args to parse
+			if hasArgs {
+				return []FTPCommand{}, fmt.Errorf("%w: command '%v' takes no arguments", ErrInvalidArguments, cmd.Token)
+			}
 			parsedCmd = FTPCommand{cmd.Token, nil}
 		}
 		cmds = append(cmds, parsedCmd)
@@ -189,28 +197,32 @@ func parse(words []string) ([]FTPCommand, error) {
 }
 
 func parseArgs(token FTPTokenType, args string) (FTPCommand, error) {
+	var cmd FTPCommand
+	var err error
 	switch token {
 	case USER:
-		return parseUser(args)
+		cmd, err = parseUser(args)
 	case PASS:
-		return parsePass(args)
+		cmd, err = parsePass(args)
 	case PORT:
-		return parsePort(args)
+		cmd, err = parsePort(args)
 	case TYPE:
-		return parseType(args)
+		cmd, err = parseType(args)
 	case MODE:
-		return parseMode(args)
+		cmd, err = parseMode(args)
 	case STRU:
-		return parseStru(args)
+		cmd, err = parseStru(args)
 	case RETR:
-		return parseRetr(args)
+		cmd, err = parseRetr(args)
 	case STOR:
-		return parseStor(args)
+		cmd, err = parseStor(args)
 	default:
-		// we check earlier that command is valid, if we get here
-		// panic and report so we can see how this could have happened!
-		panic(fmt.Sprintf("unexpected command found '%v'", token))
+		return FTPCommand{}, fmt.Errorf("unexpected command found '%d'", token)
 	}
+	if err != nil {
+		return FTPCommand{}, fmt.Errorf("%w: %v", ErrInvalidArguments, err)
+	}
+	return cmd, nil
 }
 
 func parseUser(args string) (FTPCommand, error) {
@@ -351,8 +363,8 @@ func parseStor(args string) (FTPCommand, error) {
 }
 
 func missingRequiredArgError(token FTPTokenType, args string) error {
-	fmtString := "command '%v' missing required arg, found args '%s'"
-	return fmt.Errorf(fmtString, token, args)
+	fmtString := "%w: command '%v' missing required arg, found args '%s'"
+	return fmt.Errorf(fmtString, ErrInvalidArguments, token, args)
 }
 
 /* Private helpers for creating FTPCommands, it will help keep things more concise for testing */
