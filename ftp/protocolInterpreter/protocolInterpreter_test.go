@@ -4,6 +4,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	nvtascii "wsu455ftp/telnet/nvt-ascii"
 )
 
 func TestParseCommand(t *testing.T) {
@@ -256,6 +257,60 @@ func TestFTPCommandStringInterface(t *testing.T) {
 		actual := tc.input.String()
 		if actual != tc.expected {
 			t.Fatalf("%s case: found string %s, expected %s", tc.caseName, actual, tc.expected)
+		}
+	}
+}
+
+// Tests for FTP Reply
+func TestFTPReplyToString(t *testing.T) {
+	var testCases = []struct {
+		input    FTPReply
+		expected string
+		caseName string
+	}{
+		{MakeFTPReply(220, "Service ready"), "220 Service ready\r\n", "220 greeting"},
+		{MakeFTPReply(200, "Command okay"), "200 Command okay\r\n", "200 command success"},
+		{MakeFTPReply(221, "Service closing control connection"), "221 Service closing control connection\r\n", "221 connection closing"},
+		{MakeFTPReply(500, "Syntax error, command unrecognized"), "500 Syntax error, command unrecognized\r\n", "500 error"},
+		{MakeFTPReply(501, "Syntax error in parameters or arguments"), "501 Syntax error in parameters or arguments\r\n", "501 error"},
+		{MakeFTPReply(502, "Command not implemented"), "502 Command not implemented\r\n", "502 error"},
+	}
+
+	for _, tc := range testCases {
+		actual := tc.input.String()
+		if actual != tc.expected {
+			t.Fatalf("%s case: found %q, expected %q", tc.caseName, actual, tc.expected)
+		}
+		b, err := nvtascii.FromString(actual)
+		if err != nil {
+			t.Fatalf("%s case: %v", tc.caseName, err.Error())
+		}
+		if string(b) != tc.expected {
+			t.Fatalf("%s case: found NVT ASCII %q, expected %q", tc.caseName, b, tc.expected)
+		}
+	}
+}
+
+// Simple unit tests for reply parsing, not going in depth as we will create all the
+// replies ourselves, no chance for malicious input.
+func TestFTPReplyParse(t *testing.T) {
+	var testCases = []struct {
+		input    string
+		expected FTPReply
+		caseName string
+	}{
+		{"220 Service ready", MakeFTPReply(220, "Service ready"), "basic Case"},
+		{"221 Service closing control connection", MakeFTPReply(221, "Service closing control connection"), "long text"},
+	}
+
+	for _, tc := range testCases {
+		actual, err := ParseFTPReply(tc.input)
+		if err != nil {
+			t.Fatalf("%s case: error parsing input %s", tc.caseName, tc.input)
+		}
+
+		if actual != tc.expected {
+			t.Fatalf("%s case: found %s, expected %s", tc.caseName, actual.String(), tc.expected.String())
 		}
 	}
 }

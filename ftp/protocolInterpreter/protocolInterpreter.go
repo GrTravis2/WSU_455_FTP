@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	nvtascii "wsu455ftp/telnet/nvt-ascii"
 )
 
 // FTP Command Enum Type
@@ -441,3 +442,37 @@ func MakeStruCmd(code StructureCode) FTPCommand { return FTPCommand{STRU, Struct
 func MakeRetrCmd(path string) FTPCommand        { return FTPCommand{RETR, RetrArgs{path}} }
 func MakeStorCmd(path string) FTPCommand        { return FTPCommand{STOR, StorArgs{path}} }
 func MakeNOOPCmd() FTPCommand                   { return FTPCommand{NOOP, nil} }
+
+// FTP Replies
+type FTPReply struct {
+	Code uint32
+	Msg  string
+}
+
+func (reply FTPReply) String() string {
+	return fmt.Sprintf("%d %s%s", reply.Code, reply.Msg, nvtascii.CRLF)
+}
+
+// Parse a single FTP reply string into an FTPReply struct
+func ParseFTPReply(msg string) (FTPReply, error) {
+	rawCode, text, sepFound := strings.Cut(msg, " ")
+	if !sepFound {
+		return FTPReply{}, fmt.Errorf("FTP Reply does not match expected format: %s", msg)
+	}
+	var reply FTPReply
+	var parsedCode uint64
+
+	parsedCode, err := strconv.ParseUint(rawCode, 10, 32)
+	if err != nil {
+		return FTPReply{}, fmt.Errorf("Error parsing reply code: %v", err)
+	}
+	reply.Code = uint32(parsedCode) // parseUint checks for uint32
+	reply.Msg = text
+
+	return reply, nil
+}
+
+// helper for creating FTP replies
+func MakeFTPReply(code uint32, msg string) FTPReply {
+	return FTPReply{Code: code, Msg: msg}
+}

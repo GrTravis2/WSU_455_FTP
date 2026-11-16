@@ -9,38 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
-	protocolinterpreter "wsu455ftp/ftp/protocolInterpreter"
-	nvtascii "wsu455ftp/telnet/nvt-ascii"
+	pi "wsu455ftp/ftp/protocolInterpreter"
 )
-
-func TestFTPReplyToString(t *testing.T) {
-	var testCases = []struct {
-		input    FTPReply
-		expected string
-		caseName string
-	}{
-		{makeFTPReply(220, "Service ready"), "220 Service ready\r\n", "220 greeting"},
-		{makeFTPReply(200, "Command okay"), "200 Command okay\r\n", "200 command success"},
-		{makeFTPReply(221, "Service closing control connection"), "221 Service closing control connection\r\n", "221 connection closing"},
-		{makeFTPReply(500, "Syntax error, command unrecognized"), "500 Syntax error, command unrecognized\r\n", "500 error"},
-		{makeFTPReply(501, "Syntax error in parameters or arguments"), "501 Syntax error in parameters or arguments\r\n", "501 error"},
-		{makeFTPReply(502, "Command not implemented"), "502 Command not implemented\r\n", "502 error"},
-	}
-
-	for _, tc := range testCases {
-		actual := tc.input.ToString()
-		if actual != tc.expected {
-			t.Fatalf("%s case: found %q, expected %q", tc.caseName, actual, tc.expected)
-		}
-		b, err := nvtascii.FromString(actual)
-		if err != nil {
-			t.Fatalf("%s case: %v", tc.caseName, err.Error())
-		}
-		if string(b) != tc.expected {
-			t.Fatalf("%s case: found NVT ASCII %q, expected %q", tc.caseName, b, tc.expected)
-		}
-	}
-}
 
 // start a control session and check cleanup when it ends
 func startControlSession(t *testing.T, conn net.Conn, session controlSession) func() {
@@ -255,17 +225,17 @@ func TestControlSessionErrorRecovery(t *testing.T) {
 
 func TestControlSessionHandlers(t *testing.T) {
 	session := controlSession{
-		Path: "/files", Type: protocolinterpreter.ASCII,
-		Mode: protocolinterpreter.STREAM, Structure: protocolinterpreter.FILE,
+		Path: "/files", Type: pi.ASCII,
+		Mode: pi.STREAM, Structure: pi.FILE,
 	}
 	expected := session
-	reply, err := session.RouteHandler(&protocolinterpreter.FTPCommand{Token: protocolinterpreter.NOOP})
-	if err != nil || reply.ToString() != "200 Command okay\r\n" || session != expected {
+	reply, err := session.RouteHandler(&pi.FTPCommand{Token: pi.NOOP})
+	if err != nil || reply.String() != "200 Command okay\r\n" || session != expected {
 		t.Fatalf("NOOP changed state or returned an unexpected result: %#v, %v, %#v", reply, err, session)
 	}
-	reply, err = session.RouteHandler(&protocolinterpreter.FTPCommand{Token: protocolinterpreter.QUIT})
+	reply, err = session.RouteHandler(&pi.FTPCommand{Token: pi.QUIT})
 	expected.Done = true
-	if err != nil || reply.ToString() != "221 Service closing control connection\r\n" || session != expected {
+	if err != nil || reply.String() != "221 Service closing control connection\r\n" || session != expected {
 		t.Fatalf("QUIT did not finish session correctly: %#v, %v, %#v", reply, err, session)
 	}
 }
