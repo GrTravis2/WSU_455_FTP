@@ -61,19 +61,54 @@ func (t FTPTokenType) String() string {
 
 type FTPCommand struct {
 	Token FTPTokenType
-	Args  any
+	Args  fmt.Stringer
 }
 
-/* Standard Type Args */
+// NOTE: this function just converts to string, does not handle
+// formatting such as adding CRLF
+func (cmd FTPCommand) String() string {
+	return fmt.Sprintf("%s %s", cmd.Token.String(), cmd.Args.String())
+}
+
+/* Standard Type Args
+NOTE: All args must satisfy stringer interface
+so they may be easily converted into bytes for transmission
+*/
 
 type UserArgs struct{ Username string }
-type PassArgs struct{ Pasword string }
+
+func (arg UserArgs) String() string {
+	return arg.Username
+}
+
+type PassArgs struct{ Password string }
+
+func (arg PassArgs) String() string {
+	return arg.Password
+}
+
 type PortArgs struct {
 	Ip   netip.Addr
 	Port uint16
 }
+
+func (arg PortArgs) String() string {
+	host_ip := strings.ReplaceAll(arg.Ip.String(), ".", ",")
+	host_port := fmt.Sprintf("%d,%d", arg.Port>>8, arg.Port&0xff)
+	return host_ip + "," + host_port
+}
+
 type RetrArgs struct{ Path string }
+
+func (arg RetrArgs) String() string {
+	return arg.Path
+}
+
 type StorArgs struct{ Path string }
+
+func (arg StorArgs) String() string {
+	return arg.Path
+}
 
 /* Code Args - They have finite set of chars */
 
@@ -92,6 +127,19 @@ type TypeArgs struct {
 	ByteSize uint8 // logical byte size, only relevant if Format is LOCAL
 }
 
+func (arg TypeArgs) String() string {
+	var s string
+	switch arg.Code {
+	case ASCII, EBCDIC:
+		s = string(arg.Code) + " " + string(arg.Format)
+	case IMAGE:
+		s = string(arg.Code)
+	case LOCAL:
+		s = fmt.Sprintf("%s %d", string(arg.Code), arg.ByteSize)
+	}
+	return s
+}
+
 type ModeCode byte
 
 const (
@@ -102,6 +150,10 @@ const (
 
 type ModeArgs struct{ Code ModeCode }
 
+func (arg ModeArgs) String() string {
+	return string(arg.Code)
+}
+
 type FormatCode byte
 
 const (
@@ -110,8 +162,6 @@ const (
 	CARRIAGE FormatCode = 'C'
 	NONE     FormatCode = '\x00' // IMAGE has not format type, use NULL
 )
-
-type FormArgs struct{ Code FormatCode }
 
 type StructureCode byte
 
@@ -122,6 +172,10 @@ const (
 )
 
 type StructureArgs struct{ Code StructureCode }
+
+func (arg StructureArgs) String() string {
+	return string(arg.Code)
+}
 
 var CMDMAPPING = map[string]FTPCommand{
 	"USER": {USER, UserArgs{}},
@@ -367,23 +421,23 @@ func missingRequiredArgError(token FTPTokenType, args string) error {
 	return fmt.Errorf(fmtString, ErrInvalidArguments, token, args)
 }
 
-/* Private helpers for creating FTPCommands, it will help keep things more concise for testing */
+/* Helpers for creating FTPCommands, it will help keep things more concise for testing */
 
-func makeUserCmd(user string) FTPCommand { return FTPCommand{USER, UserArgs{user}} }
-func makePassCmd(pass string) FTPCommand { return FTPCommand{PASS, PassArgs{pass}} }
-func makeQuitCmd() FTPCommand            { return FTPCommand{QUIT, nil} }
-func makePortCmd(ip string, port uint16) FTPCommand {
+func MakeUserCmd(user string) FTPCommand { return FTPCommand{USER, UserArgs{user}} }
+func MakePassCmd(pass string) FTPCommand { return FTPCommand{PASS, PassArgs{pass}} }
+func MakeQuitCmd() FTPCommand            { return FTPCommand{QUIT, nil} }
+func MakePortCmd(ip string, port uint16) FTPCommand {
 	addr, err := netip.ParseAddr(ip)
 	if err != nil {
 		log.Panicf("unable to parse ip addr '%s' into IPv4", ip)
 	}
 	return FTPCommand{PORT, PortArgs{addr, port}}
 }
-func makeTypeCmd(typeCode TypeCode, formatCode FormatCode, byteSize uint8) FTPCommand {
+func MakeTypeCmd(typeCode TypeCode, formatCode FormatCode, byteSize uint8) FTPCommand {
 	return FTPCommand{TYPE, TypeArgs{typeCode, formatCode, byteSize}}
 }
-func makeModeCmd(code ModeCode) FTPCommand      { return FTPCommand{MODE, ModeArgs{code}} }
-func makeStruCmd(code StructureCode) FTPCommand { return FTPCommand{STRU, StructureArgs{code}} }
-func makeRetrCmd(path string) FTPCommand        { return FTPCommand{RETR, RetrArgs{path}} }
-func makeStorCmd(path string) FTPCommand        { return FTPCommand{STOR, StorArgs{path}} }
-func makeNOOPCmd() FTPCommand                   { return FTPCommand{NOOP, nil} }
+func MakeModeCmd(code ModeCode) FTPCommand      { return FTPCommand{MODE, ModeArgs{code}} }
+func MakeStruCmd(code StructureCode) FTPCommand { return FTPCommand{STRU, StructureArgs{code}} }
+func MakeRetrCmd(path string) FTPCommand        { return FTPCommand{RETR, RetrArgs{path}} }
+func MakeStorCmd(path string) FTPCommand        { return FTPCommand{STOR, StorArgs{path}} }
+func MakeNOOPCmd() FTPCommand                   { return FTPCommand{NOOP, nil} }

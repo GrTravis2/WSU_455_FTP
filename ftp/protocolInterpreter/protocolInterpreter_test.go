@@ -13,49 +13,49 @@ func TestParseCommand(t *testing.T) {
 		expectedCmd FTPCommand
 		caseName    string
 	}{
-		{parseUser, "GAVIN", makeUserCmd("GAVIN"), "USER"},
-		{parseUser, "Gavin BANANA", makeUserCmd("Gavin BANANA"), "USER args with space ok"},
-		{parsePass, "secret", makePassCmd("secret"), "PASS"},
-		{parsePass, "secret FUSCHIA", makePassCmd("secret FUSCHIA"), "PASS extra cmd"},
-		{parsePass, "secret FUSCHIA ", makePassCmd("secret FUSCHIA "), "PASS extra cmd with trailing whitespace"},
-		{parsePort, "1,1,1,1,0,1", makePortCmd("1.1.1.1", 0x0001), "PORT lower bound"},
-		{parsePort, "1,1,1,1,255,255", makePortCmd("1.1.1.1", 0xFFFF), "PORT upper bound"},
-		{parseType, "A N", makeTypeCmd('A', 'N', 0), "TYPE A N"},
-		{parseType, "A T", makeTypeCmd('A', 'T', 0), "TYPE A T"},
-		{parseType, "A C", makeTypeCmd('A', 'C', 0), "TYPE A C"},
-		{parseType, "E N", makeTypeCmd('E', 'N', 0), "TYPE E N"},
-		{parseType, "E T", makeTypeCmd('E', 'T', 0), "TYPE E T"},
-		{parseType, "E C", makeTypeCmd('E', 'C', 0), "TYPE E C"},
-		{parseType, "I", makeTypeCmd('I', NONE, 0), "TYPE I"},
-		{parseType, "L 1", makeTypeCmd('L', NONE, 1), "TYPE L lower bound"},
-		{parseType, "L 255", makeTypeCmd('L', NONE, 255), "TYPE L upper bound"},
-		{parseType, "a n", makeTypeCmd('A', 'N', 0), "TYPE a n"},
-		{parseType, "a t", makeTypeCmd('A', 'T', 0), "TYPE a t"},
-		{parseType, "a c", makeTypeCmd('A', 'C', 0), "TYPE a c"},
-		{parseType, "e n", makeTypeCmd('E', 'N', 0), "TYPE e n"},
-		{parseType, "e t", makeTypeCmd('E', 'T', 0), "TYPE e t"},
-		{parseType, "e c", makeTypeCmd('E', 'C', 0), "TYPE e c"},
-		{parseType, "i", makeTypeCmd('I', NONE, 0), "TYPE i"},
-		{parseType, "l 1", makeTypeCmd('L', NONE, 1), "TYPE l lower bound"},
-		{parseType, "l 255", makeTypeCmd('L', NONE, 255), "TYPE l upper bound"},
-		{parseType, "A", makeTypeCmd('A', 'N', 0), "TYPE A missing arg"},
-		{parseType, "E", makeTypeCmd('E', 'N', 0), "TYPE E missing arg"},
-		{parseMode, "S", makeModeCmd('S'), "MODE S"},
-		{parseMode, "B", makeModeCmd('B'), "MODE B"},
-		{parseMode, "C", makeModeCmd('C'), "MODE C"},
-		{parseMode, "s", makeModeCmd('S'), "MODE s"},
-		{parseMode, "b", makeModeCmd('B'), "MODE b"},
-		{parseMode, "c", makeModeCmd('C'), "MODE c"},
-		{parseStru, "F", makeStruCmd('F'), "STRU F"},
-		{parseStru, "R", makeStruCmd('R'), "STRU R"},
-		{parseStru, "P", makeStruCmd('P'), "STRU P"},
-		{parseStru, "f", makeStruCmd('F'), "STRU f"},
-		{parseStru, "r", makeStruCmd('R'), "STRU r"},
-		{parseStru, "p", makeStruCmd('P'), "STRU p"},
-		{parseRetr, "~/Downloads", makeRetrCmd("~/Downloads"), "RETR"},
-		{parseRetr, "~/Downloads FAIL?", makeRetrCmd("~/Downloads FAIL?"), "RETR arg with space"},
-		{parseStor, "~/Downloads", makeStorCmd("~/Downloads"), "STOR"},
-		{parseStor, "~/Downloads FAIL?", makeStorCmd("~/Downloads FAIL?"), "STOR arg with space"},
+		{parseUser, "GAVIN", MakeUserCmd("GAVIN"), "USER"},
+		{parseUser, "Gavin BANANA", MakeUserCmd("Gavin BANANA"), "USER args with space ok"},
+		{parsePass, "secret", MakePassCmd("secret"), "PASS"},
+		{parsePass, "secret FUSCHIA", MakePassCmd("secret FUSCHIA"), "PASS extra cmd"},
+		{parsePass, "secret FUSCHIA ", MakePassCmd("secret FUSCHIA "), "PASS extra cmd with trailing whitespace"},
+		{parsePort, "1,1,1,1,0,1", MakePortCmd("1.1.1.1", 0x0001), "PORT lower bound"},
+		{parsePort, "1,1,1,1,255,255", MakePortCmd("1.1.1.1", 0xFFFF), "PORT upper bound"},
+		{parseType, "A N", MakeTypeCmd('A', 'N', 0), "TYPE A N"},
+		{parseType, "A T", MakeTypeCmd('A', 'T', 0), "TYPE A T"},
+		{parseType, "A C", MakeTypeCmd('A', 'C', 0), "TYPE A C"},
+		{parseType, "E N", MakeTypeCmd('E', 'N', 0), "TYPE E N"},
+		{parseType, "E T", MakeTypeCmd('E', 'T', 0), "TYPE E T"},
+		{parseType, "E C", MakeTypeCmd('E', 'C', 0), "TYPE E C"},
+		{parseType, "I", MakeTypeCmd('I', NONE, 0), "TYPE I"},
+		{parseType, "L 1", MakeTypeCmd('L', NONE, 1), "TYPE L lower bound"},
+		{parseType, "L 255", MakeTypeCmd('L', NONE, 255), "TYPE L upper bound"},
+		{parseType, "a n", MakeTypeCmd('A', 'N', 0), "TYPE a n"},
+		{parseType, "a t", MakeTypeCmd('A', 'T', 0), "TYPE a t"},
+		{parseType, "a c", MakeTypeCmd('A', 'C', 0), "TYPE a c"},
+		{parseType, "e n", MakeTypeCmd('E', 'N', 0), "TYPE e n"},
+		{parseType, "e t", MakeTypeCmd('E', 'T', 0), "TYPE e t"},
+		{parseType, "e c", MakeTypeCmd('E', 'C', 0), "TYPE e c"},
+		{parseType, "i", MakeTypeCmd('I', NONE, 0), "TYPE i"},
+		{parseType, "l 1", MakeTypeCmd('L', NONE, 1), "TYPE l lower bound"},
+		{parseType, "l 255", MakeTypeCmd('L', NONE, 255), "TYPE l upper bound"},
+		{parseType, "A", MakeTypeCmd('A', 'N', 0), "TYPE A missing arg"},
+		{parseType, "E", MakeTypeCmd('E', 'N', 0), "TYPE E missing arg"},
+		{parseMode, "S", MakeModeCmd('S'), "MODE S"},
+		{parseMode, "B", MakeModeCmd('B'), "MODE B"},
+		{parseMode, "C", MakeModeCmd('C'), "MODE C"},
+		{parseMode, "s", MakeModeCmd('S'), "MODE s"},
+		{parseMode, "b", MakeModeCmd('B'), "MODE b"},
+		{parseMode, "c", MakeModeCmd('C'), "MODE c"},
+		{parseStru, "F", MakeStruCmd('F'), "STRU F"},
+		{parseStru, "R", MakeStruCmd('R'), "STRU R"},
+		{parseStru, "P", MakeStruCmd('P'), "STRU P"},
+		{parseStru, "f", MakeStruCmd('F'), "STRU f"},
+		{parseStru, "r", MakeStruCmd('R'), "STRU r"},
+		{parseStru, "p", MakeStruCmd('P'), "STRU p"},
+		{parseRetr, "~/Downloads", MakeRetrCmd("~/Downloads"), "RETR"},
+		{parseRetr, "~/Downloads FAIL?", MakeRetrCmd("~/Downloads FAIL?"), "RETR arg with space"},
+		{parseStor, "~/Downloads", MakeStorCmd("~/Downloads"), "STOR"},
+		{parseStor, "~/Downloads FAIL?", MakeStorCmd("~/Downloads FAIL?"), "STOR arg with space"},
 	}
 
 	for _, tc := range testCases {
@@ -163,38 +163,38 @@ func TestInterpret(t *testing.T) {
 		caseName     string
 	}{
 		// Individual command parsing cases
-		{"USER GAVIN\r\n", []FTPCommand{makeUserCmd("GAVIN")}, "USER basic"},
-		{"PASS GAVIN\r\n", []FTPCommand{makePassCmd("GAVIN")}, "PASS basic"},
-		{"QUIT\r\n", []FTPCommand{makeQuitCmd()}, "QUIT basic"},
-		{"PORT 1,1,1,1,000,123\r\n", []FTPCommand{makePortCmd("1.1.1.1", 123)}, "PORT basic"},
-		{"TYPE A N\r\n", []FTPCommand{makeTypeCmd('A', 'N', 0)}, "TYPE A N basic"},
-		{"TYPE A T\r\n", []FTPCommand{makeTypeCmd('A', 'T', 0)}, "TYPE A T basic"},
-		{"TYPE A C\r\n", []FTPCommand{makeTypeCmd('A', 'C', 0)}, "TYPE A C basic"},
-		{"TYPE E N\r\n", []FTPCommand{makeTypeCmd('E', 'N', 0)}, "TYPE E N basic"},
-		{"TYPE E T\r\n", []FTPCommand{makeTypeCmd('E', 'T', 0)}, "TYPE E T basic"},
-		{"TYPE E C\r\n", []FTPCommand{makeTypeCmd('E', 'C', 0)}, "TYPE E C basic"},
-		{"TYPE I\r\n", []FTPCommand{makeTypeCmd('I', NONE, 0)}, "TYPE I basic"},
-		{"TYPE L 123\r\n", []FTPCommand{makeTypeCmd('L', NONE, 123)}, "TYPE L basic"},
-		{"MODE S\r\n", []FTPCommand{makeModeCmd('S')}, "MODE S basic"},
-		{"MODE B\r\n", []FTPCommand{makeModeCmd('B')}, "MODE B basic"},
-		{"MODE C\r\n", []FTPCommand{makeModeCmd('C')}, "MODE C basic"},
-		{"STRU F\r\n", []FTPCommand{makeStruCmd('F')}, "STRU F basic"},
-		{"STRU R\r\n", []FTPCommand{makeStruCmd('R')}, "STRU R basic"},
-		{"STRU P\r\n", []FTPCommand{makeStruCmd('P')}, "STRU P basic"},
-		{"RETR ~/Downloads/cool_file\r\n", []FTPCommand{makeRetrCmd("~/Downloads/cool_file")}, "RETR basic"},
-		{"STOR ~/Downloads/cool_file\r\n", []FTPCommand{makeStorCmd("~/Downloads/cool_file")}, "STOR basic"},
-		{"UsEr GAVIN\r\n", []FTPCommand{makeUserCmd("GAVIN")}, "Normalize command case"},
-		{"NOOP\r\n", []FTPCommand{makeNOOPCmd()}, "NOOP basic"},
+		{"USER GAVIN\r\n", []FTPCommand{MakeUserCmd("GAVIN")}, "USER basic"},
+		{"PASS GAVIN\r\n", []FTPCommand{MakePassCmd("GAVIN")}, "PASS basic"},
+		{"QUIT\r\n", []FTPCommand{MakeQuitCmd()}, "QUIT basic"},
+		{"PORT 1,1,1,1,000,123\r\n", []FTPCommand{MakePortCmd("1.1.1.1", 123)}, "PORT basic"},
+		{"TYPE A N\r\n", []FTPCommand{MakeTypeCmd('A', 'N', 0)}, "TYPE A N basic"},
+		{"TYPE A T\r\n", []FTPCommand{MakeTypeCmd('A', 'T', 0)}, "TYPE A T basic"},
+		{"TYPE A C\r\n", []FTPCommand{MakeTypeCmd('A', 'C', 0)}, "TYPE A C basic"},
+		{"TYPE E N\r\n", []FTPCommand{MakeTypeCmd('E', 'N', 0)}, "TYPE E N basic"},
+		{"TYPE E T\r\n", []FTPCommand{MakeTypeCmd('E', 'T', 0)}, "TYPE E T basic"},
+		{"TYPE E C\r\n", []FTPCommand{MakeTypeCmd('E', 'C', 0)}, "TYPE E C basic"},
+		{"TYPE I\r\n", []FTPCommand{MakeTypeCmd('I', NONE, 0)}, "TYPE I basic"},
+		{"TYPE L 123\r\n", []FTPCommand{MakeTypeCmd('L', NONE, 123)}, "TYPE L basic"},
+		{"MODE S\r\n", []FTPCommand{MakeModeCmd('S')}, "MODE S basic"},
+		{"MODE B\r\n", []FTPCommand{MakeModeCmd('B')}, "MODE B basic"},
+		{"MODE C\r\n", []FTPCommand{MakeModeCmd('C')}, "MODE C basic"},
+		{"STRU F\r\n", []FTPCommand{MakeStruCmd('F')}, "STRU F basic"},
+		{"STRU R\r\n", []FTPCommand{MakeStruCmd('R')}, "STRU R basic"},
+		{"STRU P\r\n", []FTPCommand{MakeStruCmd('P')}, "STRU P basic"},
+		{"RETR ~/Downloads/cool_file\r\n", []FTPCommand{MakeRetrCmd("~/Downloads/cool_file")}, "RETR basic"},
+		{"STOR ~/Downloads/cool_file\r\n", []FTPCommand{MakeStorCmd("~/Downloads/cool_file")}, "STOR basic"},
+		{"UsEr GAVIN\r\n", []FTPCommand{MakeUserCmd("GAVIN")}, "Normalize command case"},
+		{"NOOP\r\n", []FTPCommand{MakeNOOPCmd()}, "NOOP basic"},
 
 		// More complicated strings to parse
 		{
 			"USER GAVIN\r\nPASS admin\r\n",
-			[]FTPCommand{makeUserCmd("GAVIN"), makePassCmd("admin")},
+			[]FTPCommand{MakeUserCmd("GAVIN"), MakePassCmd("admin")},
 			"complex1",
 		},
 		{
 			"TYPE L 255\r\nSTRU R\r\nSTOR /dev/null\r\nUSER GANDALF\r\n",
-			[]FTPCommand{makeTypeCmd('L', NONE, 255), makeStruCmd('R'), makeStorCmd("/dev/null"), makeUserCmd("GANDALF")},
+			[]FTPCommand{MakeTypeCmd('L', NONE, 255), MakeStruCmd('R'), MakeStorCmd("/dev/null"), MakeUserCmd("GANDALF")},
 			"complex2",
 		},
 	}
@@ -227,6 +227,35 @@ func TestInterpretExceptionCases(t *testing.T) {
 		actual, err := Interpret(tc.input)
 		if err == nil { // why didnt it fail???
 			t.Fatalf("%s case: expected failure, found %v", tc.caseName, actual)
+		}
+	}
+}
+
+// Happy Path Test for Stringer Methods
+// (assume always valid as parsing handles validation)
+func TestFTPCommandStringInterface(t *testing.T) {
+	var testCases = []struct {
+		input    FTPCommand
+		expected string
+		caseName string
+	}{
+		{MakeUserCmd("bubba"), "USER bubba", "basic user"},
+		{MakePassCmd("secret"), "PASS secret", "basic pass"},
+		{MakePortCmd("192.168.1.2", 0x08ff), "PORT 192,168,1,2,8,255", "basic port"},
+		{MakeRetrCmd("~/Downloads"), "RETR ~/Downloads", "basic retr"},
+		{MakeStorCmd("~/Downloads"), "STOR ~/Downloads", "basic stor"},
+		{MakeTypeCmd(ASCII, NONPRINT, 0), "TYPE A N", "basic Type A"},
+		{MakeTypeCmd(EBCDIC, TELNET, 0), "TYPE E T", "basic Type E"},
+		{MakeTypeCmd('I', NONE, 0), "TYPE I", "basic Type I"},
+		{MakeTypeCmd(LOCAL, NONE, 9), "TYPE L 9", "basic Type L"},
+		{MakeModeCmd(STREAM), "MODE S", "basic Mode S"},
+		{MakeStruCmd(FILE), "STRU F", "basic STRU F"},
+	}
+
+	for _, tc := range testCases {
+		actual := tc.input.String()
+		if actual != tc.expected {
+			t.Fatalf("%s case: found string %s, expected %s", tc.caseName, actual, tc.expected)
 		}
 	}
 }
