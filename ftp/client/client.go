@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"time"
 
 	pi "wsu455ftp/ftp/protocolInterpreter"
@@ -28,7 +27,7 @@ var ErrLoginFailed = errors.New("FTP login failed")
 func NewSession(user string, pass string, ipV4 string, port string) (clientSession, error) {
 	conn, err := net.DialTimeout("tcp", ipV4+":"+port, time.Second*5)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "nable to establish connection: %v", err)
+		return clientSession{}, fmt.Errorf("unable to establish connection: %v", err)
 	}
 	client := clientSession{username: user, password: pass, openConn: conn, reader: *bufio.NewReader(conn)}
 	// check server is available, it always sends a reply when initiating a connection!
@@ -53,44 +52,57 @@ func NewSession(user string, pass string, ipV4 string, port string) (clientSessi
 	return client, nil
 }
 
+func (client *clientSession) sendCmd(cmd pi.FTPCommand) (pi.FTPReply, error) {
+	var reply pi.FTPReply
+	msg, err := nvtascii.FromString(cmd.String() + nvtascii.CRLF)
+	if err != nil {
+		return pi.FTPReply{}, fmt.Errorf("unable to convert FTP cmd to nvt-ascii: %v", err)
+	}
+	_, err = client.openConn.Write(msg)
+	if err != nil {
+		return pi.FTPReply{}, err
+	}
+	response, err := client.reader.ReadString('\n')
+	if err != nil {
+		return pi.FTPReply{}, fmt.Errorf("Transmission failed: %v", err)
+	}
+	reply, err = pi.ParseFTPReply(response)
+	if err != nil {
+		return pi.FTPReply{}, fmt.Errorf("unable to parse server reply: %v", err)
+	}
+	return reply, nil
+}
+
 func (client *clientSession) login() error {
 
 	// establish connection to FTP server
 	// start with sending username and checking reply
-	cmd, _ := nvtascii.FromString(pi.MakeUserCmd(client.username).String() + nvtascii.CRLF)
-	_, err := client.openConn.Write(cmd) // TODO
+	reply, err := client.sendCmd(pi.MakeUserCmd(client.username))
 	if err != nil {
 		return err
 	}
-	msg, err := client.reader.ReadString('\n')
-	if err != nil {
-		return fmt.Errorf("Transmission failed: %v", err)
+	if reply != server.UsernameOkReply {
+		return fmt.Errorf("unexpected server reply: %s", reply.String())
 	}
-	parsedReply, err := pi.ParseFTPReply(msg)
-	if err != nil {
-		return fmt.Errorf("unable to parse server reply: %v", err)
-	}
-	if parsedReply != server.UsernameOkReply {
-		return fmt.Errorf("unexpected server reply: %s", parsedReply)
-	}
-
 	// username good, finish login by sending password
-	cmd, _ = nvtascii.FromString(pi.MakePassCmd(client.password).String() + nvtascii.CRLF)
-	_, err = client.openConn.Write(cmd) // TODO
+	reply, err = client.sendCmd(pi.MakePassCmd(client.password))
 	if err != nil {
 		return err
 	}
-	msg, err = client.reader.ReadString('\n')
-	if err != nil {
-		return fmt.Errorf("Transmission failed: %v", err)
+	if reply != server.UserLoggedInReply {
+		return fmt.Errorf("unexpected server reply: %s", reply.String())
 	}
-	parsedReply, err = pi.ParseFTPReply(msg)
-	if err != nil {
-		return fmt.Errorf("unable to parse server reply: %v", err)
-	}
-	if parsedReply != server.UserLoggedInReply {
-		return fmt.Errorf("unexpected server reply: %s", parsedReply)
-	}
+	return nil
+}
 
+func (client *clientSession) Quit() error {
+	defer client.openConn.Close()
+	reply, err := client.sendCmd(pi.MakeQuitCmd())
+	if err != nil {
+		return err
+	}
+	if reply != server.QuitConnectionReply {
+		return fmt.Errorf("unexpected server reply: %s", reply.String())
+	}
 	return nil
 }

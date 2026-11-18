@@ -60,15 +60,22 @@ func (t FTPTokenType) String() string {
 	}
 }
 
+type FTPArgs fmt.Stringer
+
 type FTPCommand struct {
 	Token FTPTokenType
-	Args  fmt.Stringer
+	Args  FTPArgs
 }
 
 // NOTE: this function just converts to string, does not handle
 // formatting such as adding CRLF
 func (cmd FTPCommand) String() string {
-	return fmt.Sprintf("%s %s", cmd.Token.String(), cmd.Args.String())
+	switch cmd.Token {
+	case QUIT, NOOP:
+		return fmt.Sprintf("%s", cmd.Token.String())
+	default:
+		return fmt.Sprintf("%s %s", cmd.Token.String(), cmd.Args.String())
+	}
 }
 
 /* Standard Type Args
@@ -455,7 +462,7 @@ func (reply FTPReply) String() string {
 
 // Parse a single FTP reply string into an FTPReply struct
 func ParseFTPReply(msg string) (FTPReply, error) {
-	rawCode, text, sepFound := strings.Cut(msg, " ")
+	rawCode, text, sepFound := strings.Cut(strings.TrimSpace(msg), " ")
 	if !sepFound {
 		return FTPReply{}, fmt.Errorf("FTP Reply does not match expected format: %s", msg)
 	}
