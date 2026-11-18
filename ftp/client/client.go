@@ -106,3 +106,27 @@ func (client *clientSession) Quit() error {
 	}
 	return nil
 }
+
+func (client *clientSession) SetPort(ipV4 string, port uint16) error {
+	panic("Not Implemented!")
+}
+
+func (client *clientSession) SetType(typeCode pi.TypeCode, formatCode pi.FormatCode, byteSize uint8) error {
+	panic("Not Implemented!")
+}
+
+func (client *clientSession) SetMode(code pi.ModeCode) error {
+	panic("Not Implemented!")
+}
+
+func (client *clientSession) SetStru(code pi.StructureCode) error {
+	panic("Not Implemented!")
+}
+
+func (client *clientSession) Retrieve(path string) error {
+	panic("Not Implemented!")
+}
+
+func (client *clientSession) Store(path string) error {
+	panic("Not Implemented!")
+}

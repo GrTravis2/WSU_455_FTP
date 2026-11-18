@@ -29,16 +29,19 @@ func TestClientLogin(t *testing.T) {
 		}
 	})
 	// loop until server is ready to accept connections before continuing
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(3 * time.Second)
+	defer timeout.Stop()
 	for {
-		ticker := time.NewTicker(25 * time.Millisecond)
 		conn, err := net.DialTimeout("tcp", serverIp+":"+serverPort, 25*time.Millisecond)
 		if err == nil { // once connection succeeds, break and go to real test
 			conn.Close()
 			break
 		}
 		select {
-		case <-time.After(time.Millisecond * 50):
-			t.Error("server failed to connect within timeout")
+		case <-timeout.C:
+			t.Fatalf("server failed to connect within timeout: %v", err)
 		case <-ticker.C: // fall through to trigger retry every tick
 		}
 	}
@@ -48,5 +51,8 @@ func TestClientLogin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error creating new control session: %v", err)
 	}
-	client.Quit()
+	err = client.Quit()
+	if err != nil {
+		t.Fatalf("error quitting control session: %v", err)
+	}
 }
