@@ -157,6 +157,7 @@ func controlSessionHandler(
 }
 
 // format and send a reply over the control connection
+// sendreply will need to implement ftp reply.
 func sendReply(conn net.Conn, reply FTPReply) error {
 	b, err := nvtascii.FromString(reply.ToString())
 	if err != nil {

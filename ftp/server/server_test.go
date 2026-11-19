@@ -214,3 +214,14 @@ func TestControlSessionHandlers(t *testing.T) {
 		t.Fatalf("QUIT did not finish session correctly: %#v, %v, %#v", reply, err, session)
 	}
 }
+
+// testing to see if the RETR command transfers known file contents correctly
+func TestRETRTransfersKnownFileContents(t *testing.T) 
+{
+	tempDir := t.TempDir()
+	// create a known file with known contents
+	// set up a local listener
+	// send its address using PORT
+	// Send RETR over the control connection
+	// check reply, recieved bytes, and transfer complete reply.
+}
