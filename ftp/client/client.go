@@ -33,19 +33,23 @@ func NewSession(user string, pass string, ipV4 string, port string) (clientSessi
 	// check server is available, it always sends a reply when initiating a connection!
 	msg, err := client.reader.ReadString('\n')
 	if err != nil {
+		conn.Close()
 		return clientSession{}, fmt.Errorf("Transmission failed: %v", err)
 	}
 	parsedReply, err := pi.ParseFTPReply(msg)
 	if err != nil {
+		conn.Close()
 		return clientSession{}, fmt.Errorf("unable to parse server reply: %v", err)
 	}
 	if parsedReply != server.ServiceReadyReply {
+		conn.Close()
 		return clientSession{}, fmt.Errorf("unexpected server response: %s", parsedReply.String())
 	}
 
 	// Make sure authentication succeeds before anything else
 	err = client.login()
 	if err != nil {
+		conn.Close()
 		return clientSession{}, ErrLoginFailed
 	}
 
