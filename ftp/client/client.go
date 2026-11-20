@@ -41,7 +41,7 @@ func NewSession(user string, pass string, ipV4 string, port string) (clientSessi
 		conn.Close()
 		return clientSession{}, fmt.Errorf("unable to parse server reply: %v", err)
 	}
-	if parsedReply != server.ServiceReadyReply {
+	if parsedReply.Code != server.ServiceReadyReply.Code {
 		conn.Close()
 		return clientSession{}, fmt.Errorf("unexpected server response: %s", parsedReply.String())
 	}
