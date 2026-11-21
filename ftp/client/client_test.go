@@ -4,6 +4,7 @@ import (
 	"net"
 	"testing"
 	"time"
+	"wsu455ftp/ftp/constants"
 	"wsu455ftp/ftp/server"
 )
 
@@ -47,7 +48,7 @@ func TestClientLogin(t *testing.T) {
 	}
 
 	// create the client which completes login sequence
-	client, err := NewSession(server.DEFAULT_USER, server.DEFAULT_PASS, serverIp, serverPort)
+	client, err := NewSession(constants.DEFAULT_USER, constants.DEFAULT_PASS, serverIp, serverPort)
 	if err != nil {
 		t.Fatalf("error creating new control session: %v", err)
 	}

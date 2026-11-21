@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"wsu455ftp/ftp/constants"
 	pi "wsu455ftp/ftp/protocolInterpreter"
 )
 
@@ -61,9 +62,17 @@ func TestControlSessionLifecycle(t *testing.T) {
 	conn, client := net.Pipe()
 	t.Cleanup(func() { client.Close() })
 	client.SetDeadline(time.Now().Add(3 * time.Second))
-	wait := startControlSession(t, conn, controlSession{})
+	wait := startControlSession(t, conn, makeDefaultControlSession())
 	reader := bufio.NewReader(client)
 	readControlReply(t, reader, "220 Service ready\r\n", "service ready greeting")
+	if _, err := io.WriteString(client, "USER user\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	readControlReply(t, reader, constants.UsernameOkReply.String(), "user check")
+	if _, err := io.WriteString(client, "PASS password\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	readControlReply(t, reader, constants.UserLoggedInReply.String(), "pass check")
 
 	// repeated commands show that NOOP leaves the connection open
 	for i := 0; i < 2; i++ {
@@ -76,7 +85,7 @@ func TestControlSessionLifecycle(t *testing.T) {
 	if _, err := io.WriteString(client, "USER alice\r\n"); err != nil {
 		t.Fatal(err)
 	}
-	readControlReply(t, reader, fmt.Sprintf("%d %s\r\n", NotLoggedInReply.Code, NotLoggedInReply.Msg), "user not found")
+	readControlReply(t, reader, constants.NotLoggedInReply.String(), "user not found")
 
 	// buffered commands after QUIT must not be processed
 	if _, err := io.WriteString(client, "QUIT\r\nNOOP\r\n"); err != nil {
@@ -181,6 +190,14 @@ func TestControlSessionErrorRecovery(t *testing.T) {
 	wait := startControlSession(t, conn, makeDefaultControlSession())
 	reader := bufio.NewReader(client)
 	readControlReply(t, reader, "220 Service ready\r\n", "service ready greeting")
+	if _, err := io.WriteString(client, "USER user\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	readControlReply(t, reader, constants.UsernameOkReply.String(), "user check")
+	if _, err := io.WriteString(client, "PASS password\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	readControlReply(t, reader, constants.UserLoggedInReply.String(), "pass check")
 
 	var testCases = []struct {
 		command  string
@@ -195,7 +212,7 @@ func TestControlSessionErrorRecovery(t *testing.T) {
 		{"USER", "501 Syntax error in parameters or arguments\r\n", "user no args"},
 		{"NOOP extra", "501 Syntax error in parameters or arguments\r\n", "noop extra args"},
 		{"QUIT extra", "501 Syntax error in parameters or arguments\r\n", "quit extra args"},
-		{"USER alice", fmt.Sprintf("%d %s\r\n", NotLoggedInReply.Code, NotLoggedInReply.Msg), "user not found"},
+		{"USER alice", fmt.Sprintf("%d %s\r\n", constants.NotLoggedInReply.Code, constants.NotLoggedInReply.Msg), "user not found"},
 		{"PASS secret", "530 Login failed. PASS command must follow a USER command\r\n", "pass not recognized"},
 		{"TYPE A", "502 Command not implemented\r\n", "not impl"},
 		{"TYPE E N", "502 Command not implemented\r\n", "not impl"},

@@ -9,12 +9,11 @@ import (
 	"net"
 	"time"
 
+	"wsu455ftp/ftp/common"
+	"wsu455ftp/ftp/constants"
 	pi "wsu455ftp/ftp/protocolInterpreter"
-	"wsu455ftp/ftp/server"
 	nvtascii "wsu455ftp/telnet/nvt-ascii"
 )
-
-const READ_TIMEOUT = 15 * time.Second
 
 type clientSession struct {
 	username string
@@ -33,12 +32,12 @@ func NewSession(user string, pass string, ipV4 string, port string) (clientSessi
 	}
 	client := clientSession{username: user, password: pass, openConn: conn, reader: *bufio.NewReader(conn)}
 	// check server is available, it always sends a reply when initiating a connection!
-	reply, err := client.waitForReply()
+	reply, err := common.WaitForReply(client.openConn, &client.reader)
 	if err != nil {
 		conn.Close()
 		return clientSession{}, err
 	}
-	if reply.Code != server.ServiceReadyReply.Code {
+	if reply.Code != constants.ServiceReadyReply.Code {
 		conn.Close()
 		return clientSession{}, fmt.Errorf("unexpected server response: %s", reply.String())
 	}
@@ -64,7 +63,7 @@ func (client *clientSession) sendCmd(cmd pi.FTPCommand) (pi.FTPReply, error) {
 	if err != nil {
 		return pi.FTPReply{}, err
 	}
-	reply, err = client.waitForReply()
+	reply, err = common.WaitForReply(client.openConn, &client.reader)
 	return reply, err
 }
 
@@ -76,7 +75,7 @@ func (client *clientSession) login() error {
 	if err != nil {
 		return err
 	}
-	if reply != server.UsernameOkReply {
+	if reply != constants.UsernameOkReply {
 		return fmt.Errorf("unexpected server reply: %s", reply.String())
 	}
 	// username good, finish login by sending password
@@ -84,7 +83,7 @@ func (client *clientSession) login() error {
 	if err != nil {
 		return err
 	}
-	if reply != server.UserLoggedInReply {
+	if reply != constants.UserLoggedInReply {
 		return fmt.Errorf("unexpected server reply: %s", reply.String())
 	}
 	return nil
@@ -96,7 +95,7 @@ func (client *clientSession) Quit() error {
 	if err != nil {
 		return err
 	}
-	if reply != server.QuitConnectionReply {
+	if reply != constants.QuitConnectionReply {
 		return fmt.Errorf("unexpected server reply: %s", reply.String())
 	}
 	return nil
@@ -124,25 +123,4 @@ func (client *clientSession) Retrieve(path string) error {
 
 func (client *clientSession) Store(path string) error {
 	panic("Not Implemented!")
-}
-
-// Helpers
-
-func (client *clientSession) waitForReply() (pi.FTPReply, error) {
-	var reply pi.FTPReply = pi.FTPReply{}
-	var err error = nil
-	// read from control connection with timeout
-	err = client.openConn.SetReadDeadline(time.Now().Add(READ_TIMEOUT))
-	if err != nil {
-		err = fmt.Errorf("Failed to set read timeout: %v", err)
-	}
-	msg, err := client.reader.ReadString('\n')
-	if err != nil {
-		err = fmt.Errorf("Transmission failed: %v", err)
-	}
-	reply, err = pi.ParseFTPReply(msg)
-	if err != nil {
-		err = fmt.Errorf("Unable to parse server reply: %v", err)
-	}
-	return reply, err
 }

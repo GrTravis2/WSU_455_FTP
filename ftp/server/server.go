@@ -12,22 +12,10 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"wsu455ftp/ftp/common"
+	"wsu455ftp/ftp/constants"
 	pi "wsu455ftp/ftp/protocolInterpreter"
-	nvtascii "wsu455ftp/telnet/nvt-ascii"
 )
-
-const DEFAULT_CONTROL_PORT string = "21"
-const DEFAULT_DATA_PORT string = "20"
-const DEFAULT_USER string = "user"
-const DEFAULT_PASS string = "password"
-
-/* Constant Replies */
-var ServiceReadyReply = pi.MakeFTPReply(220, "Service ready")
-var UsernameOkReply = pi.MakeFTPReply(331, "User name ok, need password")
-var UserLoggedInReply = pi.MakeFTPReply(230, "User logged in")
-var NotLoggedInReply = pi.MakeFTPReply(530, "Not logged in")
-var QuitConnectionReply = pi.MakeFTPReply(221, "Service closing control connection")
-var CommandOkReply = pi.MakeFTPReply(200, "Command okay")
 
 // Session state used to apply commands
 type controlSession struct {
@@ -46,7 +34,7 @@ func makeDefaultControlSession() controlSession {
 		Mode:      pi.STREAM,
 		Structure: pi.FILE,
 		Done:      false,
-		MockDB:    map[string]string{DEFAULT_USER: DEFAULT_PASS},
+		MockDB:    map[string]string{constants.DEFAULT_USER: constants.DEFAULT_PASS},
 	}
 }
 
@@ -129,7 +117,7 @@ func handleInterpretError(err error, conn net.Conn) bool {
 		fmt.Fprintf(os.Stderr, "Unable to interpret command: %v", err)
 		return true
 	}
-	if sendErr := sendReply(conn, reply); sendErr != nil {
+	if sendErr := common.SendReply(conn, reply); sendErr != nil {
 		fmt.Fprintf(os.Stderr, "Unable to send error reply: %v", err)
 		return true
 	}
@@ -151,12 +139,19 @@ func controlSessionHandler(
 		mutex.Unlock()
 	}()
 	// send server greeting here to kick off control session (clients are expecting it)
-	if err := sendReply(openConn, ServiceReadyReply); err != nil {
+	if err := common.SendReply(openConn, constants.ServiceReadyReply); err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to send greeting: %v", err)
 		return
 	}
-
+	// new session always starts with USER then PASS commands
 	reader := bufio.NewReader(openConn)
+	authenticated := session.authenticateUser(openConn, reader)
+	if !authenticated {
+		// sessions terminating dont handle errs, send and return
+		common.SendReply(openConn, constants.NotLoggedInReply)
+		return
+	}
+	common.SendReply(openConn, constants.UserLoggedInReply)
 
 	// read until EOF found or connection fails
 	for {
@@ -180,7 +175,6 @@ func controlSessionHandler(
 			continue
 		}
 
-		var last_user string // keep last user for login sequence
 		// for each parsed command, action it and then send reply back
 		for _, c := range cmds {
 			reply, err := session.RouteHandler(&c)
@@ -188,33 +182,7 @@ func controlSessionHandler(
 				fmt.Fprintf(os.Stderr, "Failed to handle command %v: %v", c.Token, err)
 				return
 			}
-			// special case USER always followed by PASS
-			if c.Token == pi.USER && reply == UsernameOkReply {
-				// Save the last user and send reply
-				args, _ := c.Args.(pi.UserArgs)
-				last_user = args.Username
-				if err := sendReply(openConn, reply); err != nil {
-					fmt.Fprintf(os.Stderr, "Unable to send reply: %v", err)
-					return
-				}
-				// block until follow up msg recv'd, if not PASS then throw!
-				msg, err = reader.ReadString('\n')
-				needPassCmd, err := pi.Interpret(msg)
-				if err != nil {
-					exit := handleInterpretError(err, openConn)
-					if exit {
-						return
-					}
-					break
-				} else if needPassCmd[0].Token != pi.PASS || len(needPassCmd) != 1 {
-					reply = pi.MakeFTPReply(530, "Not Logged In. USER command must be followed by a single PASS command.")
-				} else {
-					passArgs, _ := needPassCmd[0].Args.(pi.PassArgs)
-					reply, err = session.PassHandler(last_user, &passArgs)
-				}
-				last_user = "" // zero out last user before continuing
-			}
-			if err := sendReply(openConn, reply); err != nil {
+			if err := common.SendReply(openConn, reply); err != nil {
 				fmt.Fprintf(os.Stderr, "Unable to send reply: %v", err)
 				return
 			}
@@ -225,20 +193,51 @@ func controlSessionHandler(
 	}
 }
 
-// format and send a reply over the control connection
-func sendReply(conn net.Conn, reply pi.FTPReply) error {
-	b, err := nvtascii.FromString(reply.String())
+// Authenticate a client with a valid USER and PASS command, return true if
+// login successful, false otherwise.
+func (session *controlSession) authenticateUser(conn net.Conn, reader *bufio.Reader) bool {
+	msg, err := reader.ReadString('\n')
 	if err != nil {
-		return err
+		fmt.Fprintf(os.Stderr, "Error reading client command: %v", err)
+		return false
 	}
-	n, err := conn.Write(b)
+	// first cmd must be a USER cmd with user in mockDB
+	cmds, err := pi.Interpret(msg)
 	if err != nil {
-		return err
+		fmt.Fprintf(os.Stderr, "Error parsing client command: %v", err)
+		return false
 	}
-	if n != len(b) {
-		return io.ErrShortWrite
+	if len(cmds) > 1 || cmds[0].Token != pi.USER {
+		fmt.Fprintf(os.Stderr, "client should start with a single USER command: %v", err)
+		return false
 	}
-	return nil
+	userArgs, _ := cmds[0].Args.(pi.UserArgs)
+	user := userArgs.Username
+	pass, found := session.MockDB[user]
+	if !found { // user not recognized
+		return false
+	}
+	common.SendReply(conn, constants.UsernameOkReply)
+	msg, err = reader.ReadString('\n')
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading client command: %v", err)
+		return false
+	}
+	// second cmd must be a PASS cmd with correct password from mockDB
+	cmds, err = pi.Interpret(msg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing client command: %v", err)
+		return false
+	}
+	if len(cmds) > 1 || cmds[0].Token != pi.PASS {
+		fmt.Fprintf(os.Stderr, "client must follow a USER command with a single PASS command: %v", err)
+		return false
+	}
+	passArgs, _ := cmds[0].Args.(pi.PassArgs)
+	if pass != passArgs.Password {
+		return false
+	}
+	return true
 }
 
 // Command Handlers
@@ -291,24 +290,24 @@ func (session *controlSession) RouteHandler(cmd *pi.FTPCommand) (pi.FTPReply, er
 func (session *controlSession) UserHandler(args *pi.UserArgs) (pi.FTPReply, error) {
 	_, found := session.MockDB[args.Username]
 	if !found {
-		return NotLoggedInReply, nil
+		return constants.NotLoggedInReply, nil
 	}
-	return UsernameOkReply, nil
+	return constants.UsernameOkReply, nil
 }
 
 // handle PASS command
 func (session *controlSession) PassHandler(user string, args *pi.PassArgs) (pi.FTPReply, error) {
 	pass := session.MockDB[user]
 	if pass != args.Password {
-		return NotLoggedInReply, nil
+		return constants.NotLoggedInReply, nil
 	}
-	return UserLoggedInReply, nil
+	return constants.UserLoggedInReply, nil
 }
 
 // handle QUIT command
 func (session *controlSession) QuitHandler() (pi.FTPReply, error) {
 	session.Done = true
-	return QuitConnectionReply, nil
+	return constants.QuitConnectionReply, nil
 }
 
 // handle PORT command
@@ -343,5 +342,5 @@ func (session *controlSession) StoreHandler(cmd *pi.StorArgs) (pi.FTPReply, erro
 
 // handle NOOP command
 func (session *controlSession) NOOPHandler() (pi.FTPReply, error) {
-	return CommandOkReply, nil
+	return constants.CommandOkReply, nil
 }
