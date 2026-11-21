@@ -12,24 +12,34 @@ import (
 	"os"
 	"os/signal"
 	"sync"
-	protocolinterpreter "wsu455ftp/ftp/protocolInterpreter"
-	nvtascii "wsu455ftp/telnet/nvt-ascii"
+	"wsu455ftp/ftp/common"
+	"wsu455ftp/ftp/constants"
+	pi "wsu455ftp/ftp/protocolInterpreter"
 )
-
-const DEFAULT_CONTROL_PORT string = "21"
-const DEFAULT_DATA_PORT string = "20"
 
 // Session state used to apply commands
 type controlSession struct {
 	Path      string
-	Type      protocolinterpreter.TypeCode
-	Mode      protocolinterpreter.ModeCode
-	Structure protocolinterpreter.StructureCode
+	Type      pi.TypeCode
+	Mode      pi.ModeCode
+	Structure pi.StructureCode
 	Done      bool
+	MockDB    map[string]string
+}
+
+func makeDefaultControlSession() controlSession {
+	return controlSession{
+		Path:      "",
+		Type:      pi.ASCII,
+		Mode:      pi.STREAM,
+		Structure: pi.FILE,
+		Done:      false,
+		MockDB:    map[string]string{constants.DEFAULT_USER: constants.DEFAULT_PASS},
+	}
 }
 
 // FTP Server Entry Point
-func run(ctx context.Context, ipV4 string, port string) error {
+func Run(ctx context.Context, ipV4 string, port string) error {
 	// register passed context to end on interrupt
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
@@ -48,13 +58,7 @@ func run(ctx context.Context, ipV4 string, port string) error {
 	var mutex sync.Mutex                           // lock for modifying sessions map
 	go func() {
 		defer serverAcceptingWg.Done()
-		default_session := controlSession{
-			Path:      "",
-			Type:      protocolinterpreter.ASCII,
-			Mode:      protocolinterpreter.STREAM,
-			Structure: protocolinterpreter.FILE,
-			Done:      false,
-		}
+		default_session := makeDefaultControlSession()
 
 		// serve forever until parent context ends
 		for {
@@ -98,6 +102,28 @@ func run(ctx context.Context, ipV4 string, port string) error {
 	return nil
 }
 
+/*
+Handle an error related to FTP interpret, returning a bool which
+represents if the error should terminate the session if true
+*/
+func handleInterpretError(err error, conn net.Conn) bool {
+	var reply pi.FTPReply
+	switch {
+	case errors.Is(err, pi.ErrInvalidCommand):
+		reply = pi.MakeFTPReply(500, "Syntax error, command unrecognized")
+	case errors.Is(err, pi.ErrInvalidArguments):
+		reply = pi.MakeFTPReply(501, "Syntax error in parameters or arguments")
+	default:
+		fmt.Fprintf(os.Stderr, "Unable to interpret command: %v", err)
+		return true
+	}
+	if sendErr := common.SendReply(conn, reply); sendErr != nil {
+		fmt.Fprintf(os.Stderr, "Unable to send error reply: %v", err)
+		return true
+	}
+	return false
+}
+
 func controlSessionHandler(
 	openConn net.Conn,
 	session controlSession,
@@ -113,12 +139,19 @@ func controlSessionHandler(
 		mutex.Unlock()
 	}()
 	// send server greeting here to kick off control session (clients are expecting it)
-	if err := sendReply(openConn, makeFTPReply(220, "Service ready")); err != nil {
+	if err := common.SendReply(openConn, constants.ServiceReadyReply); err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to send greeting: %v", err)
 		return
 	}
-
+	// new session always starts with USER then PASS commands
 	reader := bufio.NewReader(openConn)
+	authenticated := session.authenticateUser(openConn, reader)
+	if !authenticated {
+		// sessions terminating dont handle errs, send and return
+		common.SendReply(openConn, constants.NotLoggedInReply)
+		return
+	}
+	common.SendReply(openConn, constants.UserLoggedInReply)
 
 	// read until EOF found or connection fails
 	for {
@@ -133,20 +166,10 @@ func controlSessionHandler(
 			}
 			return
 		}
-		cmds, err := protocolinterpreter.Interpret(msg)
+		cmds, err := pi.Interpret(msg)
 		if err != nil {
-			var reply FTPReply
-			switch {
-			case errors.Is(err, protocolinterpreter.ErrInvalidCommand):
-				reply = makeFTPReply(500, "Syntax error, command unrecognized")
-			case errors.Is(err, protocolinterpreter.ErrInvalidArguments):
-				reply = makeFTPReply(501, "Syntax error in parameters or arguments")
-			default:
-				fmt.Fprintf(os.Stderr, "Unable to interpret command: %v", err)
-				return
-			}
-			if err := sendReply(openConn, reply); err != nil {
-				fmt.Fprintf(os.Stderr, "Unable to send error reply: %v", err)
+			exit := handleInterpretError(err, openConn)
+			if exit {
 				return
 			}
 			continue
@@ -159,7 +182,7 @@ func controlSessionHandler(
 				fmt.Fprintf(os.Stderr, "Failed to handle command %v: %v", c.Token, err)
 				return
 			}
-			if err := sendReply(openConn, reply); err != nil {
+			if err := common.SendReply(openConn, reply); err != nil {
 				fmt.Fprintf(os.Stderr, "Unable to send reply: %v", err)
 				return
 			}
@@ -170,121 +193,154 @@ func controlSessionHandler(
 	}
 }
 
-// format and send a reply over the control connection
-func sendReply(conn net.Conn, reply FTPReply) error {
-	b, err := nvtascii.FromString(reply.ToString())
+// Authenticate a client with a valid USER and PASS command, return true if
+// login successful, false otherwise.
+func (session *controlSession) authenticateUser(conn net.Conn, reader *bufio.Reader) bool {
+	msg, err := reader.ReadString('\n')
 	if err != nil {
-		return err
+		fmt.Fprintf(os.Stderr, "Error reading client command: %v", err)
+		return false
 	}
-	n, err := conn.Write(b)
+	// first cmd must be a USER cmd with user in mockDB
+	cmds, err := pi.Interpret(msg)
 	if err != nil {
-		return err
+		fmt.Fprintf(os.Stderr, "Error parsing client command: %v", err)
+		return false
 	}
-	if n != len(b) {
-		return io.ErrShortWrite
+	if len(cmds) > 1 || cmds[0].Token != pi.USER {
+		fmt.Fprintf(os.Stderr, "client should start with a single USER command: %v", err)
+		return false
 	}
-	return nil
+	userArgs, _ := cmds[0].Args.(pi.UserArgs)
+	user := userArgs.Username
+	pass, found := session.MockDB[user]
+	if !found { // user not recognized
+		return false
+	}
+	common.SendReply(conn, constants.UsernameOkReply)
+	msg, err = reader.ReadString('\n')
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading client command: %v", err)
+		return false
+	}
+	// second cmd must be a PASS cmd with correct password from mockDB
+	cmds, err = pi.Interpret(msg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing client command: %v", err)
+		return false
+	}
+	if len(cmds) > 1 || cmds[0].Token != pi.PASS {
+		fmt.Fprintf(os.Stderr, "client must follow a USER command with a single PASS command: %v", err)
+		return false
+	}
+	passArgs, _ := cmds[0].Args.(pi.PassArgs)
+	if pass != passArgs.Password {
+		return false
+	}
+	return true
 }
 
 // Command Handlers
 
 // Call handler for each specific FTP Command
-func (session *controlSession) RouteHandler(cmd *protocolinterpreter.FTPCommand) (FTPReply, error) {
-	var reply FTPReply
+func (session *controlSession) RouteHandler(cmd *pi.FTPCommand) (pi.FTPReply, error) {
+	var reply pi.FTPReply
 	var err error = nil
 	switch cmd.Token {
-	case protocolinterpreter.USER:
-		reply, err = session.UserHandler(cmd)
-	case protocolinterpreter.PASS:
-		reply, err = session.PassHandler(cmd)
-	case protocolinterpreter.QUIT:
-		reply, err = session.QuitHandler(cmd)
-	case protocolinterpreter.PORT:
-		reply, err = session.PortHandler(cmd)
-	case protocolinterpreter.TYPE:
-		reply, err = session.TypeHandler(cmd)
-	case protocolinterpreter.MODE:
-		reply, err = session.ModeHandler(cmd)
-	case protocolinterpreter.STRU:
-		reply, err = session.StructureHandler(cmd)
-	case protocolinterpreter.RETR:
-		reply, err = session.RetrieveHandler(cmd)
-	case protocolinterpreter.STOR:
-		reply, err = session.StoreHandler(cmd)
-	case protocolinterpreter.NOOP:
-		reply, err = session.NOOPHandler(cmd)
+	case pi.USER:
+		args, _ := cmd.Args.(pi.UserArgs)
+		reply, err = session.UserHandler(&args)
+	case pi.PASS:
+		reply = pi.MakeFTPReply(530, "Login failed. PASS command must follow a USER command")
+		err = nil
+	case pi.QUIT:
+		reply, err = session.QuitHandler()
+	case pi.PORT:
+		args, _ := cmd.Args.(pi.PortArgs)
+		reply, err = session.PortHandler(&args)
+	case pi.TYPE:
+		args, _ := cmd.Args.(pi.TypeArgs)
+		reply, err = session.TypeHandler(&args)
+	case pi.MODE:
+		args, _ := cmd.Args.(pi.ModeArgs)
+		reply, err = session.ModeHandler(&args)
+	case pi.STRU:
+		args, _ := cmd.Args.(pi.StructureArgs)
+		reply, err = session.StructureHandler(&args)
+	case pi.RETR:
+		args, _ := cmd.Args.(pi.RetrArgs)
+		reply, err = session.RetrieveHandler(&args)
+	case pi.STOR:
+		args, _ := cmd.Args.(pi.StorArgs)
+		reply, err = session.StoreHandler(&args)
+	case pi.NOOP:
+		reply, err = session.NOOPHandler()
 	default:
-		return makeFTPReply(502, "Command not implemented"), nil
+		return pi.MakeFTPReply(502, "Command not implemented"), nil
 	}
 
 	// handlers which are still stubs must not send a 000 reply
-	if err == nil && reply.Code == [3]byte{} {
-		reply = makeFTPReply(502, "Command not implemented")
+	if err == nil && reply.Code == 0 {
+		reply = pi.MakeFTPReply(502, "Command not implemented")
 	}
 	return reply, err
 }
 
 // handle USER command
-func (session *controlSession) UserHandler(cmd *protocolinterpreter.FTPCommand) (FTPReply, error) {
-	return FTPReply{}, nil
+func (session *controlSession) UserHandler(args *pi.UserArgs) (pi.FTPReply, error) {
+	_, found := session.MockDB[args.Username]
+	if !found {
+		return constants.NotLoggedInReply, nil
+	}
+	return constants.UsernameOkReply, nil
 }
 
 // handle PASS command
-func (session *controlSession) PassHandler(cmd *protocolinterpreter.FTPCommand) (FTPReply, error) {
-	return FTPReply{}, nil
+func (session *controlSession) PassHandler(user string, args *pi.PassArgs) (pi.FTPReply, error) {
+	pass := session.MockDB[user]
+	if pass != args.Password {
+		return constants.NotLoggedInReply, nil
+	}
+	return constants.UserLoggedInReply, nil
 }
 
 // handle QUIT command
-func (session *controlSession) QuitHandler(cmd *protocolinterpreter.FTPCommand) (FTPReply, error) {
+func (session *controlSession) QuitHandler() (pi.FTPReply, error) {
 	session.Done = true
-	return makeFTPReply(221, "Service closing control connection"), nil
+	return constants.QuitConnectionReply, nil
 }
 
 // handle PORT command
-func (session *controlSession) PortHandler(cmd *protocolinterpreter.FTPCommand) (FTPReply, error) {
-	return FTPReply{}, nil
+func (session *controlSession) PortHandler(cmd *pi.PortArgs) (pi.FTPReply, error) {
+	return pi.FTPReply{}, nil
 }
 
 // handle Type command
-func (session *controlSession) TypeHandler(cmd *protocolinterpreter.FTPCommand) (FTPReply, error) {
-	return FTPReply{}, nil
+func (session *controlSession) TypeHandler(cmd *pi.TypeArgs) (pi.FTPReply, error) {
+	return pi.FTPReply{}, nil
 }
 
 // handle Mode command
-func (session *controlSession) ModeHandler(cmd *protocolinterpreter.FTPCommand) (FTPReply, error) {
-	return FTPReply{}, nil
+func (session *controlSession) ModeHandler(cmd *pi.ModeArgs) (pi.FTPReply, error) {
+	return pi.FTPReply{}, nil
 }
 
 // handle Structure command
-func (session *controlSession) StructureHandler(cmd *protocolinterpreter.FTPCommand) (FTPReply, error) {
-	return FTPReply{}, nil
+func (session *controlSession) StructureHandler(cmd *pi.StructureArgs) (pi.FTPReply, error) {
+	return pi.FTPReply{}, nil
 }
 
 // handle Retrieve command
-func (session *controlSession) RetrieveHandler(cmd *protocolinterpreter.FTPCommand) (FTPReply, error) {
-	return FTPReply{}, nil
+func (session *controlSession) RetrieveHandler(cmd *pi.RetrArgs) (pi.FTPReply, error) {
+	return pi.FTPReply{}, nil
 }
 
 // handle Store command
-func (session *controlSession) StoreHandler(cmd *protocolinterpreter.FTPCommand) (FTPReply, error) {
-	return FTPReply{}, nil
+func (session *controlSession) StoreHandler(cmd *pi.StorArgs) (pi.FTPReply, error) {
+	return pi.FTPReply{}, nil
 }
 
 // handle NOOP command
-func (session *controlSession) NOOPHandler(cmd *protocolinterpreter.FTPCommand) (FTPReply, error) {
-	return makeFTPReply(200, "Command okay"), nil
-}
-
-type FTPReply struct {
-	Code [3]byte
-	Msg  string
-}
-
-func (reply *FTPReply) ToString() string {
-	return fmt.Sprintf("%d%d%d %s%s", reply.Code[0], reply.Code[1], reply.Code[2], reply.Msg, nvtascii.CRLF)
-}
-
-// helper for creating FTP replies
-func makeFTPReply(code int, msg string) FTPReply {
-	return FTPReply{[3]byte{byte(code / 100), byte(code / 10 % 10), byte(code % 10)}, msg}
+func (session *controlSession) NOOPHandler() (pi.FTPReply, error) {
+	return constants.CommandOkReply, nil
 }
