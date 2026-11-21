@@ -270,3 +270,86 @@ type FTPReply struct {
 func (reply *FTPReply) ToString() string {
 	return fmt.Sprintf("%d%d%d %s%s", reply.Code[0], reply.Code[1], reply.Code[2], reply.Msg, nvtascii.CRLF)
 }
+
+// File structures
+// getting help from claude via links and pointers on what I might be doing wrong without getting code examples from it. Can share what I am getting as repsonses
+// if need be and I am also going to try and do more reading into the function calls and how I should be setting everything up.
+type FileStructure interface {
+	// Define methods for file structure
+	// Code reports which structure an implementation reperesents.
+	Code() protocolinterpreter.StructureCode
+	Send(io.Reader, io.Writer) error
+	Receive(io.Reader, io.Writer) error
+}
+
+// fileStructure is a concrete implementation of the FileStructure interface for the "file" structure.
+type fileStructure struct{}
+
+// Code reports which structure an implementation reperesents.
+func (file fileStructure) Code() protocolinterpreter.StructureCode {
+	return protocolinterpreter.FILE
+}
+
+// Send sends a file from the reader to the writer using the file structure's rules.
+func (file fileStructure) Send(reader io.Reader, writer io.Writer) error {
+	// first thing is probably check for errors, then blank spaces before sending to the reciever for the next part.
+	if _, err := reader.Peek(1); err != nil {
+		if err == io.EOF {
+			return nil // nothing to send
+		}
+		return err
+	}
+	return writer
+}
+
+// Receive receives a file from the reader to the writer using the file structure's rules.
+func (file fileStructure) Receive(reader io.Reader, writer io.Writer) error {
+	// example code from gobyexamle reading files.
+	path := filepath.Join(os.TempDir(), "dat")
+    dat, err := os.ReadFile(path)
+    check(err)
+    fmt.Print(string(dat))
+
+    f, err := os.Open(path)
+    check(err)
+
+    b1 := make([]byte, 5)
+    n1, err := f.Read(b1)
+    check(err)
+    fmt.Printf("%d bytes: %s\n", n1, string(b1[:n1]))
+
+    o2, err := f.Seek(6, io.SeekStart)
+    check(err)
+    b2 := make([]byte, 2)
+    n2, err := f.Read(b2)
+    check(err)
+    fmt.Printf("%d bytes @ %d: ", n2, o2)
+    fmt.Printf("%v\n", string(b2[:n2]))
+
+    _, err = f.Seek(2, io.SeekCurrent)
+    check(err)
+
+    _, err = f.Seek(-4, io.SeekEnd)
+    check(err)
+
+    o3, err := f.Seek(6, io.SeekStart)
+    check(err)
+    b3 := make([]byte, 2)
+    n3, err := io.ReadAtLeast(f, b3, 2)
+    check(err)
+    fmt.Printf("%d bytes @ %d: %s\n", n3, o3, string(b3))
+
+    _, err = f.Seek(0, io.SeekStart)
+    check(err)
+
+    r4 := bufio.NewReader(f)
+    b4, err := r4.Peek(5)
+    check(err)
+    fmt.Printf("5 bytes: %s\n", string(b4))
+
+    f.Close()
+}
+
+
+
+
