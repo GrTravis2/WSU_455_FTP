@@ -214,12 +214,35 @@ func TestControlSessionErrorRecovery(t *testing.T) {
 		{"QUIT extra", "501 Syntax error in parameters or arguments\r\n", "quit extra args"},
 		{"USER alice", fmt.Sprintf("%d %s\r\n", constants.NotLoggedInReply.Code, constants.NotLoggedInReply.Msg), "user not found"},
 		{"PASS secret", "530 Login failed. PASS command must follow a USER command\r\n", "pass not recognized"},
-		{"TYPE A", "502 Command not implemented\r\n", "not impl"},
-		{"TYPE E N", "502 Command not implemented\r\n", "not impl"},
-		{"TYPE I", "502 Command not implemented\r\n", "not impl"},
-		{"TYPE L 8", "502 Command not implemented\r\n", "not impl"},
-		{"MODE S", "502 Command not implemented\r\n", "not impl"},
-		{"STRU F", "502 Command not implemented\r\n", "not impl"},
+		{"TYPE I", "200 Command okay\r\n", "TYPE I"},
+		{"TYPE A", "200 Command okay\r\n", "TYPE A"},
+		{"type a n", "200 Command okay\r\n", "type a n"},
+		{"type i", "200 Command okay\r\n", "type i"},
+		{"TYPE A T", "504 Command not implemented for that parameter\r\n", "TYPE A T"},
+		{"TYPE A C", "504 Command not implemented for that parameter\r\n", "TYPE A C"},
+		{"TYPE E", "504 Command not implemented for that parameter\r\n", "TYPE E"},
+		{"TYPE E N", "504 Command not implemented for that parameter\r\n", "TYPE E N"},
+		{"TYPE E T", "504 Command not implemented for that parameter\r\n", "TYPE E T"},
+		{"TYPE E C", "504 Command not implemented for that parameter\r\n", "TYPE E C"},
+		{"TYPE L 8", "504 Command not implemented for that parameter\r\n", "TYPE L 8"},
+		{"TYPE L 16", "504 Command not implemented for that parameter\r\n", "TYPE L 16"},
+		{"TYPE", "501 Syntax error in parameters or arguments\r\n", "TYPE"},
+		{"TYPE A X", "501 Syntax error in parameters or arguments\r\n", "TYPE A X"},
+		{"TYPE I extra", "501 Syntax error in parameters or arguments\r\n", "TYPE I extra"},
+		{"TYPE L", "501 Syntax error in parameters or arguments\r\n", "TYPE L"},
+		{"TYPE L 0", "501 Syntax error in parameters or arguments\r\n", "TYPE L 0"},
+		{"MODE S", "200 Command okay\r\n", "MODE S"},
+		{"mode s", "200 Command okay\r\n", "mode s"},
+		{"MODE B", "504 Command not implemented for that parameter\r\n", "MODE B"},
+		{"MODE C", "504 Command not implemented for that parameter\r\n", "MODE C"},
+		{"MODE", "501 Syntax error in parameters or arguments\r\n", "MODE"},
+		{"MODE S extra", "501 Syntax error in parameters or arguments\r\n", "MODE S extra"},
+		{"STRU F", "200 Command okay\r\n", "STRU F"},
+		{"stru f", "200 Command okay\r\n", "stru f"},
+		{"STRU R", "504 Command not implemented for that parameter\r\n", "STRU R"},
+		{"STRU P", "504 Command not implemented for that parameter\r\n", "STRU P"},
+		{"STRU", "501 Syntax error in parameters or arguments\r\n", "STRU"},
+		{"STRU F extra", "501 Syntax error in parameters or arguments\r\n", "STRU F extra"},
 		{"PORT 127,0,0,1,195,80", "502 Command not implemented\r\n", "not impl"},
 		{"RETR report.txt", "502 Command not implemented\r\n", "not impl"},
 		{"STOR report.txt", "502 Command not implemented\r\n", "not impl"},
@@ -256,6 +279,120 @@ func TestControlSessionHandlers(t *testing.T) {
 	expected.Done = true
 	if err != nil || reply.String() != "221 Service closing control connection\r\n" || !ControlSessionsMatch(&session, &expected) {
 		t.Fatalf("QUIT did not finish session correctly: %#v, %v, %#v", reply, err, session)
+	}
+}
+
+func TestTypeHandler(t *testing.T) {
+	var testCases = []struct {
+		args     pi.FTPArgs
+		code     uint32
+		expected pi.TypeCode
+		caseName string
+	}{
+		{pi.TypeArgs{pi.ASCII, pi.NONPRINT, 0}, 200, pi.ASCII, "ASCII Non-print"},
+		{pi.TypeArgs{pi.IMAGE, pi.NONE, 0}, 200, pi.IMAGE, "Image"},
+		{pi.TypeArgs{pi.ASCII, pi.TELNET, 0}, 504, pi.IMAGE, "ASCII Telnet"},
+		{pi.TypeArgs{pi.ASCII, pi.CARRIAGE, 0}, 504, pi.IMAGE, "ASCII carriage control"},
+		{pi.TypeArgs{pi.EBCDIC, pi.NONPRINT, 0}, 504, pi.IMAGE, "EBCDIC Non-print"},
+		{pi.TypeArgs{pi.EBCDIC, pi.TELNET, 0}, 504, pi.IMAGE, "EBCDIC Telnet"},
+		{pi.TypeArgs{pi.EBCDIC, pi.CARRIAGE, 0}, 504, pi.IMAGE, "EBCDIC carriage control"},
+		{pi.TypeArgs{pi.LOCAL, pi.NONE, 8}, 504, pi.IMAGE, "Local 8"},
+		{pi.TypeArgs{pi.LOCAL, pi.NONE, 16}, 504, pi.IMAGE, "Local 16"},
+		{nil, 501, pi.IMAGE, "missing arguments"},
+		{pi.ModeArgs{}, 501, pi.IMAGE, "wrong argument type"},
+		{pi.TypeArgs{}, 501, pi.IMAGE, "invalid type"},
+		{pi.TypeArgs{pi.ASCII, 'X', 0}, 501, pi.IMAGE, "invalid format"},
+		{pi.TypeArgs{pi.ASCII, pi.NONPRINT, 8}, 501, pi.IMAGE, "ASCII with byte size"},
+		{pi.TypeArgs{pi.IMAGE, pi.NONPRINT, 0}, 501, pi.IMAGE, "Image with format"},
+		{pi.TypeArgs{pi.IMAGE, pi.NONE, 8}, 501, pi.IMAGE, "Image with byte size"},
+		{pi.TypeArgs{pi.LOCAL, pi.NONE, 0}, 501, pi.IMAGE, "Local without byte size"},
+		{pi.TypeArgs{pi.LOCAL, pi.NONPRINT, 8}, 501, pi.IMAGE, "Local with format"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.caseName, func(t *testing.T) {
+			session := controlSession{Path: "/files", Type: pi.IMAGE, Mode: pi.STREAM, Structure: pi.FILE, MockDB: map[string]string{constants.DEFAULT_USER: constants.DEFAULT_PASS}}
+			if tc.code == 200 && tc.expected == pi.IMAGE {
+				session.Type = pi.ASCII
+			}
+			expected := session
+			expected.Type = tc.expected
+			reply, err := session.RouteHandler(&pi.FTPCommand{Token: pi.TYPE, Args: tc.args})
+			if err != nil || reply.Code != tc.code ||
+				session.Path != expected.Path || session.Type != expected.Type ||
+				session.Mode != expected.Mode || session.Structure != expected.Structure ||
+				session.Done != expected.Done || len(session.MockDB) != 1 ||
+				session.MockDB[constants.DEFAULT_USER] != constants.DEFAULT_PASS {
+				t.Fatalf("unexpected TYPE result: %#v, %v, session %#v, expected %#v", reply, err, session, expected)
+			}
+		})
+	}
+}
+
+func TestModeHandler(t *testing.T) {
+	var testCases = []struct {
+		args     pi.FTPArgs
+		code     uint32
+		expected pi.ModeCode
+		caseName string
+	}{
+		{pi.ModeArgs{pi.STREAM}, 200, pi.STREAM, "Stream"},
+		{pi.ModeArgs{pi.BLOCK}, 504, pi.STREAM, "Block"},
+		{pi.ModeArgs{pi.COMPRESSED}, 504, pi.STREAM, "Compressed"},
+		{nil, 501, pi.STREAM, "missing arguments"},
+		{pi.TypeArgs{}, 501, pi.STREAM, "wrong argument type"},
+		{pi.ModeArgs{'X'}, 501, pi.STREAM, "invalid mode"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.caseName, func(t *testing.T) {
+			session := controlSession{Path: "/files", Type: pi.IMAGE, Mode: pi.STREAM, Structure: pi.FILE, MockDB: map[string]string{constants.DEFAULT_USER: constants.DEFAULT_PASS}}
+			if tc.code == 200 {
+				session.Mode = pi.BLOCK
+			}
+			expected := session
+			expected.Mode = tc.expected
+			reply, err := session.RouteHandler(&pi.FTPCommand{Token: pi.MODE, Args: tc.args})
+			if err != nil || reply.Code != tc.code ||
+				session.Path != expected.Path || session.Type != expected.Type ||
+				session.Mode != expected.Mode || session.Structure != expected.Structure ||
+				session.Done != expected.Done || len(session.MockDB) != 1 ||
+				session.MockDB[constants.DEFAULT_USER] != constants.DEFAULT_PASS {
+				t.Fatalf("unexpected MODE result: %#v, %v, session %#v, expected %#v", reply, err, session, expected)
+			}
+		})
+	}
+}
+
+func TestStructureHandler(t *testing.T) {
+	var testCases = []struct {
+		args     pi.FTPArgs
+		code     uint32
+		expected pi.StructureCode
+		caseName string
+	}{
+		{pi.StructureArgs{pi.FILE}, 200, pi.FILE, "File"},
+		{pi.StructureArgs{pi.RECORD}, 504, pi.FILE, "Record"},
+		{pi.StructureArgs{pi.PAGE}, 504, pi.FILE, "Page"},
+		{nil, 501, pi.FILE, "missing arguments"},
+		{pi.ModeArgs{}, 501, pi.FILE, "wrong argument type"},
+		{pi.StructureArgs{'X'}, 501, pi.FILE, "invalid structure"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.caseName, func(t *testing.T) {
+			session := controlSession{Path: "/files", Type: pi.IMAGE, Mode: pi.STREAM, Structure: pi.FILE, MockDB: map[string]string{constants.DEFAULT_USER: constants.DEFAULT_PASS}}
+			if tc.code == 200 {
+				session.Structure = pi.RECORD
+			}
+			expected := session
+			expected.Structure = tc.expected
+			reply, err := session.RouteHandler(&pi.FTPCommand{Token: pi.STRU, Args: tc.args})
+			if err != nil || reply.Code != tc.code ||
+				session.Path != expected.Path || session.Type != expected.Type ||
+				session.Mode != expected.Mode || session.Structure != expected.Structure ||
+				session.Done != expected.Done || len(session.MockDB) != 1 ||
+				session.MockDB[constants.DEFAULT_USER] != constants.DEFAULT_PASS {
+				t.Fatalf("unexpected STRU result: %#v, %v, session %#v, expected %#v", reply, err, session, expected)
+			}
+		})
 	}
 }
 

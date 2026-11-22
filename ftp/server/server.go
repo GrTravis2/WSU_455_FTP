@@ -318,18 +318,63 @@ func (session *controlSession) PortHandler(cmd *pi.PortArgs) (pi.FTPReply, error
 }
 
 // handle Type command
-func (session *controlSession) TypeHandler(cmd *pi.TypeArgs) (pi.FTPReply, error) {
-	return pi.FTPReply{}, nil
+func (session *controlSession) TypeHandler(args *pi.TypeArgs) (pi.FTPReply, error) {
+	if args == nil {
+		return pi.MakeFTPReply(501, "Syntax error in parameters or arguments"), nil
+	}
+	switch args.Code {
+	case pi.ASCII, pi.EBCDIC:
+		if args.ByteSize != 0 || (args.Format != pi.NONPRINT && args.Format != pi.TELNET && args.Format != pi.CARRIAGE) {
+			return pi.MakeFTPReply(501, "Syntax error in parameters or arguments"), nil
+		}
+	case pi.IMAGE:
+		if args.Format != pi.NONE || args.ByteSize != 0 {
+			return pi.MakeFTPReply(501, "Syntax error in parameters or arguments"), nil
+		}
+	case pi.LOCAL:
+		if args.Format != pi.NONE || args.ByteSize == 0 {
+			return pi.MakeFTPReply(501, "Syntax error in parameters or arguments"), nil
+		}
+	default:
+		return pi.MakeFTPReply(501, "Syntax error in parameters or arguments"), nil
+	}
+	if args.Code != pi.IMAGE && (args.Code != pi.ASCII || args.Format != pi.NONPRINT) {
+		return pi.MakeFTPReply(504, "Command not implemented for that parameter"), nil
+	}
+	session.Type = args.Code
+	return constants.CommandOkReply, nil
 }
 
 // handle Mode command
-func (session *controlSession) ModeHandler(cmd *pi.ModeArgs) (pi.FTPReply, error) {
-	return pi.FTPReply{}, nil
+func (session *controlSession) ModeHandler(args *pi.ModeArgs) (pi.FTPReply, error) {
+	if args == nil {
+		return pi.MakeFTPReply(501, "Syntax error in parameters or arguments"), nil
+	}
+	switch args.Code {
+	case pi.STREAM:
+		session.Mode = args.Code
+		return constants.CommandOkReply, nil
+	case pi.BLOCK, pi.COMPRESSED:
+		return pi.MakeFTPReply(504, "Command not implemented for that parameter"), nil
+	default:
+		return pi.MakeFTPReply(501, "Syntax error in parameters or arguments"), nil
+	}
 }
 
 // handle Structure command
-func (session *controlSession) StructureHandler(cmd *pi.StructureArgs) (pi.FTPReply, error) {
-	return pi.FTPReply{}, nil
+func (session *controlSession) StructureHandler(args *pi.StructureArgs) (pi.FTPReply, error) {
+	if args == nil {
+		return pi.MakeFTPReply(501, "Syntax error in parameters or arguments"), nil
+	}
+	switch args.Code {
+	case pi.FILE:
+		session.Structure = args.Code
+		return constants.CommandOkReply, nil
+	case pi.RECORD, pi.PAGE:
+		return pi.MakeFTPReply(504, "Command not implemented for that parameter"), nil
+	default:
+		return pi.MakeFTPReply(501, "Syntax error in parameters or arguments"), nil
+	}
 }
 
 // handle Retrieve command
