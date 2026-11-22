@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"time"
 
 	"wsu455ftp/ftp/common"
@@ -16,21 +17,30 @@ import (
 )
 
 type clientSession struct {
-	username string
-	password string
-	openConn net.Conn
-	reader   bufio.Reader
+	username   string
+	password   string
+	serverIp   string
+	serverPort string
+	openConn   net.Conn
+	reader     bufio.Reader
 }
 
 var ErrLoginFailed = errors.New("FTP login failed")
 
 // Create and authenticate a new client session
-func NewSession(user string, pass string, ipV4 string, port string) (clientSession, error) {
-	conn, err := net.DialTimeout("tcp", ipV4+":"+port, time.Second*5)
+func NewSession(user string, pass string, serverIP string, serverPort string) (clientSession, error) {
+	conn, err := net.DialTimeout("tcp", serverIP+":"+serverPort, time.Second*5)
 	if err != nil {
 		return clientSession{}, fmt.Errorf("unable to establish connection: %v", err)
 	}
-	client := clientSession{username: user, password: pass, openConn: conn, reader: *bufio.NewReader(conn)}
+	client := clientSession{
+		username:   user,
+		password:   pass,
+		serverIp:   serverIP,
+		serverPort: serverPort,
+		openConn:   conn,
+		reader:     *bufio.NewReader(conn),
+	}
 	// check server is available, it always sends a reply when initiating a connection!
 	reply, err := common.WaitForReply(client.openConn, &client.reader)
 	if err != nil {
@@ -102,25 +112,55 @@ func (client *clientSession) Quit() error {
 }
 
 func (client *clientSession) SetPort(ipV4 string, port uint16) error {
-	panic("Not Implemented!")
+	common.NotImplementedError()
+	return nil
 }
 
 func (client *clientSession) SetType(typeCode pi.TypeCode, formatCode pi.FormatCode, byteSize uint8) error {
-	panic("Not Implemented!")
+	common.NotImplementedError()
+	return nil
 }
 
 func (client *clientSession) SetMode(code pi.ModeCode) error {
-	panic("Not Implemented!")
+	common.NotImplementedError()
+	return nil
 }
 
 func (client *clientSession) SetStru(code pi.StructureCode) error {
-	panic("Not Implemented!")
+	common.NotImplementedError()
+	return nil
 }
 
 func (client *clientSession) Retrieve(path string) error {
-	panic("Not Implemented!")
+	reply, err := client.sendCmd(pi.MakeRetrCmd(path))
+	if err != nil {
+		return err
+	}
+	// if server port is invalid, should get caught at login -> dont check :)
+	dataPort, _ := strconv.Atoi(client.serverPort)
+	// retr sets up data connection from server, listen and accept
+	listener, err := net.Listen("tcp", client.serverIp+":"+fmt.Sprintf("%d", dataPort-1))
+	if err != nil { // error setting up listener
+		return fmt.Errorf("Unable to open TCP listener: %v", err)
+	}
+	defer listener.Close()
+	switch reply.Code {
+	case constants.FileTransferSuccesfulReply.Code:
+		return nil
+	default:
+		return fmt.Errorf("Retrieve command unsuccesful: %s", reply.String())
+	}
 }
 
 func (client *clientSession) Store(path string) error {
-	panic("Not Implemented!")
+	reply, err := client.sendCmd(pi.MakeStorCmd(path))
+	if err != nil {
+		return err
+	}
+	switch reply.Code {
+	case constants.FileTransferSuccesfulReply.Code:
+		return nil
+	default:
+		return fmt.Errorf("Store command unsuccesful: %s", reply.String())
+	}
 }

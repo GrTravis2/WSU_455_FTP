@@ -8,10 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"sync"
+	"time"
 	"wsu455ftp/ftp/common"
 	"wsu455ftp/ftp/constants"
 	pi "wsu455ftp/ftp/protocolInterpreter"
@@ -19,27 +23,53 @@ import (
 
 // Session state used to apply commands
 type controlSession struct {
-	Path      string
-	Type      pi.TypeCode
-	Mode      pi.ModeCode
-	Structure pi.StructureCode
-	Done      bool
-	MockDB    map[string]string
+	controlConn net.Conn
+	Path        string
+	Type        pi.TypeCode
+	Mode        pi.ModeCode
+	Structure   pi.StructureCode
+	Done        bool
+	MockDB      map[string]string
+	serverIp    string
+	serverPort  string
+	clientIP    string
+	clientPort  string
+	dataChan    chan transferJob
+	dataIP      string
+	dataPort    string
 }
 
-func makeDefaultControlSession() controlSession {
+type transferJob struct {
+	fileOp   pi.FTPTokenType
+	filePath string
+	reply    pi.FTPReply
+}
+
+func makeDefaultControlSession(
+	controlConn net.Conn,
+	serverIP string,
+	serverPort string,
+) controlSession {
 	return controlSession{
-		Path:      "",
-		Type:      pi.ASCII,
-		Mode:      pi.STREAM,
-		Structure: pi.FILE,
-		Done:      false,
-		MockDB:    map[string]string{constants.DEFAULT_USER: constants.DEFAULT_PASS},
+		controlConn: controlConn,
+		Path:        "",
+		Type:        pi.ASCII,
+		Mode:        pi.STREAM,
+		Structure:   pi.FILE,
+		Done:        false,
+		MockDB:      map[string]string{constants.DEFAULT_USER: constants.DEFAULT_PASS},
+		dataChan:    make(chan transferJob, 32),
+		serverIp:    serverIP,
+		serverPort:  serverPort,
 	}
 }
 
 // FTP Server Entry Point
-func Run(ctx context.Context, ipV4 string, port string) error {
+func Run(
+	ctx context.Context,
+	serverIP string,
+	serverPort string,
+) error {
 	// register passed context to end on interrupt
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
@@ -47,7 +77,7 @@ func Run(ctx context.Context, ipV4 string, port string) error {
 	var cleanupWg sync.WaitGroup         // for tracking that there are no active sessions left
 
 	// create the FTP server lisenting on ip:port
-	server, err := net.Listen("tcp4", ipV4+":"+port)
+	server, err := net.Listen("tcp4", serverIP+":"+serverPort)
 	if err != nil {
 		return fmt.Errorf("Unable to start control server: %v", err)
 	}
@@ -58,7 +88,6 @@ func Run(ctx context.Context, ipV4 string, port string) error {
 	var mutex sync.Mutex                           // lock for modifying sessions map
 	go func() {
 		defer serverAcceptingWg.Done()
-		default_session := makeDefaultControlSession()
 
 		// serve forever until parent context ends
 		for {
@@ -72,11 +101,19 @@ func Run(ctx context.Context, ipV4 string, port string) error {
 				}
 			} else {
 				// spin off a control session thread
+				default_session := makeDefaultControlSession(conn, serverIP, serverPort)
 				mutex.Lock()
 				active_sessions[conn] = struct{}{} // add reference to active sessions
 				cleanupWg.Add(1)
 				mutex.Unlock()
-				go controlSessionHandler(conn, default_session, &cleanupWg, &mutex, active_sessions)
+				ip, port, found := strings.Cut(conn.RemoteAddr().String(), ":")
+				if !found {
+					fmt.Fprintf(os.Stderr, "Expected IPv4 address found: %v", conn.LocalAddr().String())
+					continue // skip non-ipv4 strings
+				}
+				default_session.clientIP = ip
+				default_session.clientPort = port
+				go controlSessionHandler(default_session, &cleanupWg, &mutex, active_sessions)
 			}
 		}
 	}()
@@ -125,7 +162,6 @@ func handleInterpretError(err error, conn net.Conn) bool {
 }
 
 func controlSessionHandler(
-	openConn net.Conn,
 	session controlSession,
 	wg *sync.WaitGroup,
 	mutex *sync.Mutex,
@@ -133,25 +169,25 @@ func controlSessionHandler(
 ) {
 	defer wg.Done()
 	defer func() {
-		openConn.Close()
+		session.controlConn.Close()
 		mutex.Lock()
-		delete(active_sessions, openConn)
+		delete(active_sessions, session.controlConn)
 		mutex.Unlock()
 	}()
 	// send server greeting here to kick off control session (clients are expecting it)
-	if err := common.SendReply(openConn, constants.ServiceReadyReply); err != nil {
+	if err := common.SendReply(session.controlConn, constants.ServiceReadyReply); err != nil {
 		fmt.Fprintf(os.Stderr, "Unable to send greeting: %v", err)
 		return
 	}
 	// new session always starts with USER then PASS commands
-	reader := bufio.NewReader(openConn)
-	authenticated := session.authenticateUser(openConn, reader)
+	reader := bufio.NewReader(session.controlConn)
+	authenticated := session.authenticateUser(session.controlConn, reader)
 	if !authenticated {
 		// sessions terminating dont handle errs, send and return
-		common.SendReply(openConn, constants.NotLoggedInReply)
+		common.SendReply(session.controlConn, constants.NotLoggedInReply)
 		return
 	}
-	common.SendReply(openConn, constants.UserLoggedInReply)
+	common.SendReply(session.controlConn, constants.UserLoggedInReply)
 
 	// read until EOF found or connection fails
 	for {
@@ -168,7 +204,7 @@ func controlSessionHandler(
 		}
 		cmds, err := pi.Interpret(msg)
 		if err != nil {
-			exit := handleInterpretError(err, openConn)
+			exit := handleInterpretError(err, session.controlConn)
 			if exit {
 				return
 			}
@@ -182,7 +218,7 @@ func controlSessionHandler(
 				fmt.Fprintf(os.Stderr, "Failed to handle command %v: %v", c.Token, err)
 				return
 			}
-			if err := common.SendReply(openConn, reply); err != nil {
+			if err := common.SendReply(session.controlConn, reply); err != nil {
 				fmt.Fprintf(os.Stderr, "Unable to send reply: %v", err)
 				return
 			}
@@ -313,36 +349,213 @@ func (session *controlSession) QuitHandler() (pi.FTPReply, error) {
 }
 
 // handle PORT command
-func (session *controlSession) PortHandler(cmd *pi.PortArgs) (pi.FTPReply, error) {
+func (session *controlSession) PortHandler(args *pi.PortArgs) (pi.FTPReply, error) {
 	return pi.FTPReply{}, nil
 }
 
 // handle Type command
-func (session *controlSession) TypeHandler(cmd *pi.TypeArgs) (pi.FTPReply, error) {
+func (session *controlSession) TypeHandler(args *pi.TypeArgs) (pi.FTPReply, error) {
 	return pi.FTPReply{}, nil
 }
 
 // handle Mode command
-func (session *controlSession) ModeHandler(cmd *pi.ModeArgs) (pi.FTPReply, error) {
+func (session *controlSession) ModeHandler(args *pi.ModeArgs) (pi.FTPReply, error) {
 	return pi.FTPReply{}, nil
 }
 
 // handle Structure command
-func (session *controlSession) StructureHandler(cmd *pi.StructureArgs) (pi.FTPReply, error) {
+func (session *controlSession) StructureHandler(args *pi.StructureArgs) (pi.FTPReply, error) {
 	return pi.FTPReply{}, nil
 }
 
 // handle Retrieve command
-func (session *controlSession) RetrieveHandler(cmd *pi.RetrArgs) (pi.FTPReply, error) {
-	return pi.FTPReply{}, nil
+func (session *controlSession) RetrieveHandler(args *pi.RetrArgs) (pi.FTPReply, error) {
+	var dataIp string
+	var dataPort string
+	var done chan bool = make(chan bool, 1) // chan that holds one bool to signal job done
+	if session.dataIP == "" {               // use the set dataIP if provided, fallback is client
+		dataIp = session.clientIP
+	} else {
+		dataIp = session.dataIP
+	}
+	if session.dataPort == "" { // same for port, but fallback to default port
+		dataPort = session.clientPort
+	} else {
+		dataPort = session.dataPort
+	}
+	serverPort, err := strconv.Atoi(session.serverPort)
+	if err != nil {
+		return pi.FTPReply{}, fmt.Errorf("Invalid serverPort string: %s", session.serverPort)
+	}
+	go dataSessionHandler(
+		session.serverIp,
+		serverPort,
+		dataIp,
+		dataPort,
+		session.dataChan,
+		done,
+		pi.RETR,
+		args.Path,
+		session.Type,
+		session.Mode,
+		session.Structure,
+		retrieveHelper,
+	)
+	// block until a job status returns
+	jobStatus := <-session.dataChan
+	// failure to start data connection
+	if jobStatus.reply.Code != constants.FileStatusOkReply.Code {
+		return jobStatus.reply, nil // we act on errors below, just deal with replies for now
+	}
+	common.SendReply(session.controlConn, jobStatus.reply) // send intermediate reply, transfer is in progress
+	// a second reply will either be a success or a failure for some r
+	jobStatus = <-session.dataChan
+	return jobStatus.reply, nil
 }
 
 // handle Store command
-func (session *controlSession) StoreHandler(cmd *pi.StorArgs) (pi.FTPReply, error) {
-	return pi.FTPReply{}, nil
+func (session *controlSession) StoreHandler(args *pi.StorArgs) (pi.FTPReply, error) {
+	var dataIp string
+	var dataPort string
+	var done chan bool = make(chan bool, 1) // chan that holds one bool to signal job done
+	if session.dataIP == "" {               // use the set dataIP if provided, fallback is client
+		dataIp = session.clientIP
+	} else {
+		dataIp = session.dataIP
+	}
+	if session.dataPort == "" { // same for port, but fallback to default port
+		dataPort = session.clientPort
+	} else {
+		dataPort = session.dataPort
+	}
+	serverPort, err := strconv.Atoi(session.serverPort)
+	if err != nil {
+		return pi.FTPReply{}, fmt.Errorf("Invalid serverPort string: %s", session.serverPort)
+	}
+	go dataSessionHandler(
+		session.serverIp,
+		serverPort,
+		dataIp,
+		dataPort,
+		session.dataChan,
+		done,
+		pi.STOR,
+		args.Path,
+		session.Type,
+		session.Mode,
+		session.Structure,
+		storeHelper,
+	)
+	// block until a job status returns
+	jobStatus := <-session.dataChan
+	// failure to start data connection
+	if jobStatus.reply.Code != constants.FileStatusOkReply.Code {
+		return jobStatus.reply, nil // we act on errors below, just deal with replies for now
+	}
+	common.SendReply(session.controlConn, jobStatus.reply) // send intermediate reply, transfer is in progress
+	// a second reply will either be a success or a failure for some r
+	jobStatus = <-session.dataChan
+	return jobStatus.reply, nil
 }
 
 // handle NOOP command
 func (session *controlSession) NOOPHandler() (pi.FTPReply, error) {
 	return constants.CommandOkReply, nil
+}
+
+// File Operation Helper Functions
+
+func mapFileOpsErrorToFTPReply(err error) (pi.FTPReply, error) {
+	var reply pi.FTPReply
+	switch {
+	case errors.Is(err, constants.ErrFailedDataConnection):
+		reply = constants.DataConnectionFailToOpenReply
+	case errors.Is(err, constants.ErrDataConnectionClosed):
+		reply = constants.DataConnectionAbortedReply
+	case errors.Is(err, constants.ErrDataServerIssue):
+		reply = constants.DataConnectionServerErrorReply
+	case errors.Is(err, constants.ErrFileNotFound):
+		reply = constants.FileUnavailableReply
+	default:
+		return pi.FTPReply{}, fmt.Errorf("dataSessionHandler returned an unregistered error, please add it: %v", err)
+	}
+	return reply, nil
+}
+
+// Create a new thread for handling a data transaction (store/retr)
+func dataSessionHandler(
+	serverIp string,
+	serverPort int,
+	destIP string,
+	destPort string,
+	dataChan chan transferJob,
+	doneChan chan bool,
+	fileOp pi.FTPTokenType,
+	path string,
+	fileType pi.TypeCode,
+	fileMode pi.ModeCode,
+	fileStructure pi.StructureCode,
+	dataHandlerFn func(net.Conn, string, pi.TypeCode, pi.ModeCode, pi.StructureCode) error,
+) {
+	// establish connection
+	dialer := net.Dialer{
+		Timeout: 5 * time.Second,
+		LocalAddr: &net.TCPAddr{
+			IP:   net.ParseIP(serverIp),
+			Port: serverPort - 1,
+		},
+	}
+	conn, err := dialer.Dial("tcp", destIP+":"+destPort)
+	if err != nil { // err connecting to destination
+		// send error through chan and return
+		dataChan <- transferJob{fileOp, path, constants.DataConnectionFailToOpenReply}
+		return
+	}
+	defer conn.Close()
+
+	// check path is valid before continuing, only for RETR command
+	// since STOR creates files if they do not already exist
+	if fileOp != pi.STOR {
+		_, err = os.Stat(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			dataChan <- transferJob{fileOp, path, constants.FileUnavailableReply}
+			return
+		}
+	}
+	// setup looks good, send intermediate reply before doing the actual transfer
+	dataChan <- transferJob{fileOp, path, constants.FileStatusOkReply}
+	// run the file transfer helper function passed
+	err = dataHandlerFn(conn, path, fileType, fileMode, fileStructure)
+	if err != nil { // error occurred handling file
+		reply, err := mapFileOpsErrorToFTPReply(err)
+		if err != nil { // this error has no registered supply
+			reply = pi.MakeFTPReply(999, fmt.Sprintf("Unrecognized error: %v", err))
+		}
+		dataChan <- transferJob{fileOp, path, reply}
+		return
+	}
+	dataChan <- transferJob{fileOp, path, constants.FileTransferSuccesfulReply} // success
+	doneChan <- true
+}
+
+func retrieveHelper(
+	conn net.Conn,
+	path string,
+	fileType pi.TypeCode,
+	fileMode pi.ModeCode,
+	fileStructure pi.StructureCode,
+) error {
+	common.NotImplementedError()
+	return nil
+}
+
+func storeHelper(
+	conn net.Conn,
+	path string,
+	fileType pi.TypeCode,
+	fileMode pi.ModeCode,
+	fileStructure pi.StructureCode,
+) error {
+	common.NotImplementedError()
+	return nil
 }
