@@ -248,6 +248,8 @@ func (session *controlSession) RouteHandler(cmd *pi.FTPCommand) (pi.FTPReply, er
 	var err error = nil
 	switch cmd.Token {
 	case pi.USER:
+		// TODO: FTP supports changing users at any time, update
+		// This switch statement to change user AND THEN look for password
 		args, _ := cmd.Args.(pi.UserArgs)
 		reply, err = session.UserHandler(&args)
 	case pi.PASS:
@@ -276,7 +278,7 @@ func (session *controlSession) RouteHandler(cmd *pi.FTPCommand) (pi.FTPReply, er
 	case pi.NOOP:
 		reply, err = session.NOOPHandler()
 	default:
-		return pi.MakeFTPReply(502, "Command not implemented"), nil
+		reply = pi.MakeFTPReply(502, "Command not implemented")
 	}
 
 	// handlers which are still stubs must not send a 000 reply
