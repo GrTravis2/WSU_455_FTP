@@ -161,6 +161,6 @@ func (client *clientSession) Store(path string) error {
 	case constants.FileTransferSuccesfulReply.Code:
 		return nil
 	default:
-		return fmt.Errorf("Store command unsuccesful: %s", reply.String())
+		return fmt.Errorf("Store command unsuccessful: %s", reply.String())
 	}
 }
