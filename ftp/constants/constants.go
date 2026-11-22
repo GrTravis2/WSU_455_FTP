@@ -25,7 +25,7 @@ var DataConnectionAbortedReply = pi.MakeFTPReply(426, "Connection closed; transf
 var DataConnectionServerErrorReply = pi.MakeFTPReply(451, "Requested action aborted due to local server error")
 var FileUnavailableReply = pi.MakeFTPReply(550, "File unavailable")
 var FileStatusOkReply = pi.MakeFTPReply(150, "File status ok; about to open data connection")
-var FileTransferSuccesfulReply = pi.MakeFTPReply(226, "Closing data connection, file transfer successful")
+var FileTransferSuccessfulReply = pi.MakeFTPReply(226, "Closing data connection, file transfer successful")
 
 /* Constant Errors */
 var ErrFailedDataConnection = errors.New("Unable to establish data connection")

@@ -145,7 +145,7 @@ func (client *clientSession) Retrieve(path string) error {
 	}
 	defer listener.Close()
 	switch reply.Code {
-	case constants.FileTransferSuccesfulReply.Code:
+	case constants.FileTransferSuccessfulReply.Code:
 		return nil
 	default:
 		return fmt.Errorf("Retrieve command unsuccesful: %s", reply.String())
@@ -158,7 +158,7 @@ func (client *clientSession) Store(path string) error {
 		return err
 	}
 	switch reply.Code {
-	case constants.FileTransferSuccesfulReply.Code:
+	case constants.FileTransferSuccessfulReply.Code:
 		return nil
 	default:
 		return fmt.Errorf("Store command unsuccessful: %s", reply.String())

@@ -534,7 +534,7 @@ func dataSessionHandler(
 		dataChan <- transferJob{fileOp, path, reply}
 		return
 	}
-	dataChan <- transferJob{fileOp, path, constants.FileTransferSuccesfulReply} // success
+	dataChan <- transferJob{fileOp, path, constants.FileTransferSuccessfulReply} // success
 	doneChan <- true
 }
 
