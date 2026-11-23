@@ -4,43 +4,15 @@ package server
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"net"
 	"sync"
 	"testing"
 	"time"
-	protocolinterpreter "wsu455ftp/ftp/protocolInterpreter"
-	nvtascii "wsu455ftp/telnet/nvt-ascii"
+	"wsu455ftp/ftp/constants"
+	pi "wsu455ftp/ftp/protocolInterpreter"
 )
-
-func TestFTPReplyToString(t *testing.T) {
-	var testCases = []struct {
-		input    FTPReply
-		expected string
-		caseName string
-	}{
-		{makeFTPReply(220, "Service ready"), "220 Service ready\r\n", "220 greeting"},
-		{makeFTPReply(200, "Command okay"), "200 Command okay\r\n", "200 command success"},
-		{makeFTPReply(221, "Service closing control connection"), "221 Service closing control connection\r\n", "221 connection closing"},
-		{makeFTPReply(500, "Syntax error, command unrecognized"), "500 Syntax error, command unrecognized\r\n", "500 error"},
-		{makeFTPReply(501, "Syntax error in parameters or arguments"), "501 Syntax error in parameters or arguments\r\n", "501 error"},
-		{makeFTPReply(502, "Command not implemented"), "502 Command not implemented\r\n", "502 error"},
-	}
-
-	for _, tc := range testCases {
-		actual := tc.input.ToString()
-		if actual != tc.expected {
-			t.Fatalf("%s case: found %q, expected %q", tc.caseName, actual, tc.expected)
-		}
-		b, err := nvtascii.FromString(actual)
-		if err != nil {
-			t.Fatalf("%s case: %v", tc.caseName, err.Error())
-		}
-		if string(b) != tc.expected {
-			t.Fatalf("%s case: found NVT ASCII %q, expected %q", tc.caseName, b, tc.expected)
-		}
-	}
-}
 
 // start a control session and check cleanup when it ends
 func startControlSession(t *testing.T, conn net.Conn, session controlSession) func() {
@@ -75,14 +47,14 @@ func startControlSession(t *testing.T, conn net.Conn, session controlSession) fu
 	return wait
 }
 
-func readControlReply(t *testing.T, reader *bufio.Reader, expected string) {
+func readControlReply(t *testing.T, reader *bufio.Reader, expected string, caseName string) {
 	t.Helper()
 	actual, err := reader.ReadString('\n')
 	if err != nil {
-		t.Fatalf("unable to read reply: %v", err)
+		t.Fatalf("%s case: unable to read reply: %v", caseName, err)
 	}
 	if actual != expected {
-		t.Fatalf("found reply %q, expected %q", actual, expected)
+		t.Fatalf("%s case: found reply %q, expected %q", caseName, actual, expected)
 	}
 }
 
@@ -90,28 +62,36 @@ func TestControlSessionLifecycle(t *testing.T) {
 	conn, client := net.Pipe()
 	t.Cleanup(func() { client.Close() })
 	client.SetDeadline(time.Now().Add(3 * time.Second))
-	wait := startControlSession(t, conn, controlSession{})
+	wait := startControlSession(t, conn, makeDefaultControlSession())
 	reader := bufio.NewReader(client)
-	readControlReply(t, reader, "220 Service ready\r\n")
+	readControlReply(t, reader, "220 Service ready\r\n", "service ready greeting")
+	if _, err := io.WriteString(client, "USER user\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	readControlReply(t, reader, constants.UsernameOkReply.String(), "user check")
+	if _, err := io.WriteString(client, "PASS password\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	readControlReply(t, reader, constants.UserLoggedInReply.String(), "pass check")
 
 	// repeated commands show that NOOP leaves the connection open
 	for i := 0; i < 2; i++ {
 		if _, err := io.WriteString(client, "NOOP\r\n"); err != nil {
 			t.Fatal(err)
 		}
-		readControlReply(t, reader, "200 Command okay\r\n")
+		readControlReply(t, reader, "200 Command okay\r\n", "connection open")
 	}
 	// a parsed but unimplemented command must not produce 000
 	if _, err := io.WriteString(client, "USER alice\r\n"); err != nil {
 		t.Fatal(err)
 	}
-	readControlReply(t, reader, "502 Command not implemented\r\n")
+	readControlReply(t, reader, constants.NotLoggedInReply.String(), "user not found")
 
 	// buffered commands after QUIT must not be processed
 	if _, err := io.WriteString(client, "QUIT\r\nNOOP\r\n"); err != nil {
 		t.Fatal(err)
 	}
-	readControlReply(t, reader, "221 Service closing control connection\r\n")
+	readControlReply(t, reader, "221 Service closing control connection\r\n", "commands after quit must not be parsed")
 	if b, err := reader.ReadByte(); err != io.EOF {
 		t.Fatalf("expected EOF after QUIT, found byte %q and error %v", b, err)
 	}
@@ -129,7 +109,7 @@ func TestControlSessionDisconnect(t *testing.T) {
 			}
 			wait := startControlSession(t, conn, controlSession{})
 			if caseName != "before greeting" {
-				readControlReply(t, bufio.NewReader(client), "220 Service ready\r\n")
+				readControlReply(t, bufio.NewReader(client), "220 Service ready\r\n", caseName)
 				if caseName == "partial command" {
 					if _, err := io.WriteString(client, "NOOP\r"); err != nil {
 						t.Fatal(err)
@@ -190,7 +170,7 @@ func TestControlSessionFailedWrite(t *testing.T) {
 			wait := startControlSession(t, failingConn, controlSession{})
 			reader := bufio.NewReader(client)
 			if tc.command != "" {
-				readControlReply(t, reader, "220 Service ready\r\n")
+				readControlReply(t, reader, "220 Service ready\r\n", tc.caseName)
 				if _, err := io.WriteString(client, tc.command); err != nil {
 					t.Fatal(err)
 				}
@@ -207,46 +187,55 @@ func TestControlSessionErrorRecovery(t *testing.T) {
 	conn, client := net.Pipe()
 	t.Cleanup(func() { client.Close() })
 	client.SetDeadline(time.Now().Add(3 * time.Second))
-	wait := startControlSession(t, conn, controlSession{})
+	wait := startControlSession(t, conn, makeDefaultControlSession())
 	reader := bufio.NewReader(client)
-	readControlReply(t, reader, "220 Service ready\r\n")
+	readControlReply(t, reader, "220 Service ready\r\n", "service ready greeting")
+	if _, err := io.WriteString(client, "USER user\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	readControlReply(t, reader, constants.UsernameOkReply.String(), "user check")
+	if _, err := io.WriteString(client, "PASS password\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	readControlReply(t, reader, constants.UserLoggedInReply.String(), "pass check")
 
 	var testCases = []struct {
-		command string
-		reply   string
+		command  string
+		reply    string
+		caseName string
 	}{
-		{"UNKNOWN", "500 Syntax error, command unrecognized\r\n"},
-		{"TYPE X", "501 Syntax error in parameters or arguments\r\n"},
-		{"MODE X", "501 Syntax error in parameters or arguments\r\n"},
-		{"STRU X", "501 Syntax error in parameters or arguments\r\n"},
-		{"PORT 1,2,3", "501 Syntax error in parameters or arguments\r\n"},
-		{"USER", "501 Syntax error in parameters or arguments\r\n"},
-		{"NOOP extra", "501 Syntax error in parameters or arguments\r\n"},
-		{"QUIT extra", "501 Syntax error in parameters or arguments\r\n"},
-		{"USER alice", "502 Command not implemented\r\n"},
-		{"PASS secret", "502 Command not implemented\r\n"},
-		{"TYPE A", "502 Command not implemented\r\n"},
-		{"TYPE E N", "502 Command not implemented\r\n"},
-		{"TYPE I", "502 Command not implemented\r\n"},
-		{"TYPE L 8", "502 Command not implemented\r\n"},
-		{"MODE S", "502 Command not implemented\r\n"},
-		{"STRU F", "502 Command not implemented\r\n"},
-		{"PORT 127,0,0,1,195,80", "502 Command not implemented\r\n"},
-		{"RETR report.txt", "502 Command not implemented\r\n"},
-		{"STOR report.txt", "502 Command not implemented\r\n"},
+		{"UNKNOWN", "500 Syntax error, command unrecognized\r\n", "unknown cmd"},
+		{"TYPE X", "501 Syntax error in parameters or arguments\r\n", "basic type"},
+		{"MODE X", "501 Syntax error in parameters or arguments\r\n", "basic mode"},
+		{"STRU X", "501 Syntax error in parameters or arguments\r\n", "basic stru"},
+		{"PORT 1,2,3", "501 Syntax error in parameters or arguments\r\n", "basic port"},
+		{"USER", "501 Syntax error in parameters or arguments\r\n", "user no args"},
+		{"NOOP extra", "501 Syntax error in parameters or arguments\r\n", "noop extra args"},
+		{"QUIT extra", "501 Syntax error in parameters or arguments\r\n", "quit extra args"},
+		{"USER alice", fmt.Sprintf("%d %s\r\n", constants.NotLoggedInReply.Code, constants.NotLoggedInReply.Msg), "user not found"},
+		{"PASS secret", "530 Login failed. PASS command must follow a USER command\r\n", "pass not recognized"},
+		{"TYPE A", "502 Command not implemented\r\n", "not impl"},
+		{"TYPE E N", "502 Command not implemented\r\n", "not impl"},
+		{"TYPE I", "502 Command not implemented\r\n", "not impl"},
+		{"TYPE L 8", "502 Command not implemented\r\n", "not impl"},
+		{"MODE S", "502 Command not implemented\r\n", "not impl"},
+		{"STRU F", "502 Command not implemented\r\n", "not impl"},
+		{"PORT 127,0,0,1,195,80", "502 Command not implemented\r\n", "not impl"},
+		{"RETR report.txt", "502 Command not implemented\r\n", "not impl"},
+		{"STOR report.txt", "502 Command not implemented\r\n", "not impl"},
 	}
 	for _, tc := range testCases {
 		// the next command must work even when both arrive in one write
 		if _, err := io.WriteString(client, tc.command+"\r\nNOOP\r\n"); err != nil {
 			t.Fatal(err)
 		}
-		readControlReply(t, reader, tc.reply)
-		readControlReply(t, reader, "200 Command okay\r\n")
+		readControlReply(t, reader, tc.reply, tc.caseName)
+		readControlReply(t, reader, "200 Command okay\r\n", tc.caseName)
 	}
 	if _, err := io.WriteString(client, "QUIT\r\n"); err != nil {
 		t.Fatal(err)
 	}
-	readControlReply(t, reader, "221 Service closing control connection\r\n")
+	readControlReply(t, reader, "221 Service closing control connection\r\n", "quit session closes connection")
 	if b, err := reader.ReadByte(); err != io.EOF {
 		t.Fatalf("expected EOF after QUIT, found byte %q and error %v", b, err)
 	}
@@ -255,17 +244,31 @@ func TestControlSessionErrorRecovery(t *testing.T) {
 
 func TestControlSessionHandlers(t *testing.T) {
 	session := controlSession{
-		Path: "/files", Type: protocolinterpreter.ASCII,
-		Mode: protocolinterpreter.STREAM, Structure: protocolinterpreter.FILE,
+		Path: "/files", Type: pi.ASCII,
+		Mode: pi.STREAM, Structure: pi.FILE,
 	}
 	expected := session
-	reply, err := session.RouteHandler(&protocolinterpreter.FTPCommand{Token: protocolinterpreter.NOOP})
-	if err != nil || reply.ToString() != "200 Command okay\r\n" || session != expected {
+	reply, err := session.RouteHandler(&pi.FTPCommand{Token: pi.NOOP})
+	if err != nil || reply.String() != "200 Command okay\r\n" || !ControlSessionsMatch(&session, &expected) {
 		t.Fatalf("NOOP changed state or returned an unexpected result: %#v, %v, %#v", reply, err, session)
 	}
-	reply, err = session.RouteHandler(&protocolinterpreter.FTPCommand{Token: protocolinterpreter.QUIT})
+	reply, err = session.RouteHandler(&pi.FTPCommand{Token: pi.QUIT})
 	expected.Done = true
-	if err != nil || reply.ToString() != "221 Service closing control connection\r\n" || session != expected {
+	if err != nil || reply.String() != "221 Service closing control connection\r\n" || !ControlSessionsMatch(&session, &expected) {
 		t.Fatalf("QUIT did not finish session correctly: %#v, %v, %#v", reply, err, session)
 	}
+}
+
+// Testing Helpers
+
+// Compare two control sessions, return true if all values outside of the mock
+// database map are the same, false otherwise.
+func ControlSessionsMatch(lhs *controlSession, rhs *controlSession) bool {
+	match := (lhs.Path == rhs.Path &&
+		lhs.Type == rhs.Type &&
+		lhs.Mode == rhs.Mode &&
+		lhs.Structure == rhs.Structure &&
+		lhs.Done == rhs.Done)
+
+	return match
 }
