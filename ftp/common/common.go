@@ -45,14 +45,17 @@ func WaitForReply(conn net.Conn, reader *bufio.Reader) (pi.FTPReply, error) {
 	err = conn.SetReadDeadline(time.Now().Add(READ_TIMEOUT))
 	if err != nil {
 		err = fmt.Errorf("Failed to set read timeout: %v", err)
+		return pi.FTPReply{}, err
 	}
 	msg, err := reader.ReadString('\n')
 	if err != nil {
 		err = fmt.Errorf("Transmission failed: %v", err)
+		return pi.FTPReply{}, err
 	}
 	reply, err = pi.ParseFTPReply(msg)
 	if err != nil {
 		err = fmt.Errorf("Unable to parse server reply: %v", err)
+		return pi.FTPReply{}, err
 	}
 	return reply, err
 }
