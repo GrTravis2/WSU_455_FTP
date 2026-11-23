@@ -1,0 +1,12 @@
+{
+  "ExpandedNodes": [
+    "",
+    "\\ftp",
+    "\\ftp\\constants",
+    "\\ftp\\protocolInterpreter",
+    "\\ftp\\server",
+    "\\telnet"
+  ],
+  "SelectedNode": "\\ftp\\server\\server_test.go",
+  "PreviewInSolutionExplorer": false
+}

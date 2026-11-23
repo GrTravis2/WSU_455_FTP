@@ -273,3 +273,108 @@ func ControlSessionsMatch(lhs *controlSession, rhs *controlSession) bool {
 
 	return match
 }
+
+// Temp file Helper
+func TempFileHelper(t *testing.T, data []byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "test.txt")
+	err := os.WriteFile(path, data, 0o644)
+	if (err != nil){t.Fatal(err)}
+	return path
+}
+
+// payloadGen
+func MakePayload(size int) []byte{
+	rng := rand.New(rand.NewSource(1))
+	data := make([]byte, size)
+	rng.Read(data)
+	if size >= 4 {
+		data[0] = '\r'
+		data[1] = '\n'
+		data[2] = 0
+		data[size-1] = 0xFF
+	}
+	return data
+}
+
+// run-retrieve Helper
+// this will connect a fake client to the retrievehelper
+func RunRetrieveHelper(t *testing.T, path string, fileType pi.TypeCode) []byte {
+	t.Helper()
+	server, client := net.Pipe()
+	server.SetDeadline(time.Now().Add(3 * time.Second))
+	client.SetDeadline(time.Now().Add(3 * time.Second))
+	var reciever []byte
+	var readError error
+	var endChannel make(chan struct{})
+	go func(){
+		reciever, readError = io.ReadAll(client)
+		close(endChannel)
+	}()
+	helpErr := retrieveHelper(server, path, fileType, pi.STREAM, pi.FILE)
+	server.Close()
+	<- endChannel
+	if readError != nil {
+		t.Fatal(readError)
+	}
+	client.Close()
+	return reciever, helpErr
+}
+
+// helper to check that the bytes recieved match the bytes expected
+// on a missmatch it will report where they differ without printing the contents
+func CompareBytesHelper(t *testing.T, recieved []byte, wanted []byte, caseFail string) {
+	t.Helper()
+	if bytes.Equal(recieved, wanted) {
+		return;
+	}
+	counter := 0
+	for counter < len(recieved) && counter < len(wanted) && recieved[counter] == wanted[counter] {
+		counter++
+	}
+	t.Fatalf("%s Case: recieved %d total bytes, wanted %d byte amount, first mismatch occured at index %d", caseFail, len(recieved), len(wanted), counter)
+}
+
+// this test is for verifying retrieve is able to retrieve a small file properly.
+func TestRetrieveHelperSmallFile(t *testing.T) {
+	testString := []byte("test line one\ntest line two\n")
+	path := TempFileHelper(t, testString)
+	retrieved, err := RunRetrieveHelper(t, path, pi.ASCII)
+	if err != nil {
+		t.Fatalf("%v error occured", err)
+	}
+	CompareBytesHelper(t, retrieved, testString, "small file")
+}
+
+// this test is for verifying that an empty file is retrieved as zero bytes
+func TestRetrieveHelperEmptyFile(t *testing.T) {
+	testString := []byte("")
+	path := TempFileHelper(t, testString)
+	retrieved, err := RunRetrieveHelper(t, path, pi.ASCII)
+	if err != nil {
+		t.Fatalf("%v error occured", err)
+	}
+	CompareBytesHelper(t, retrieved, testString, "empty file")
+}
+
+// this test is for verifying that binary data is loading, this includes \r, \n, NUL, and 0xFF is retrieved byte for byte.
+func TestRetrieveHelperBinaryFile(t *testing.T) {
+	testdata := MakePayload(300)
+	path := TempFileHelper(t, testdata)
+	retrieved, err := RunRetrieveHelper(t, path, pi.ASCII)
+	if err != nil {
+		t.Fatalf("%v error occured", err)
+	}
+	CompareBytesHelper(t, retrieved, testdata, "binary file")
+}
+
+// this test is for verifying that the retrievehelper is able to process large files.
+func TestRetrieveHelperLargeFile(t *testing.T) {
+	testdata := MakePayload(4*1024*1024 + 133)
+	path := TempFileHelper(t, testdata)
+	retrieved, err := RunRetrieveHelper(t, path, pi.ASCII)
+	if err != nil {
+		t.Fatalf("%v error occured", err)
+	}
+	CompareBytesHelper(t, retrieved, testdata, "large file")
+}
