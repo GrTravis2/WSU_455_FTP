@@ -214,12 +214,39 @@ func TestControlSessionErrorRecovery(t *testing.T) {
 		{"QUIT extra", "501 Syntax error in parameters or arguments\r\n", "quit extra args"},
 		{"USER alice", fmt.Sprintf("%d %s\r\n", constants.NotLoggedInReply.Code, constants.NotLoggedInReply.Msg), "user not found"},
 		{"PASS secret", "530 Login failed. PASS command must follow a USER command\r\n", "pass not recognized"},
-		{"TYPE A", "502 Command not implemented\r\n", "not impl"},
-		{"TYPE E N", "502 Command not implemented\r\n", "not impl"},
-		{"TYPE I", "502 Command not implemented\r\n", "not impl"},
-		{"TYPE L 8", "502 Command not implemented\r\n", "not impl"},
-		{"MODE S", "502 Command not implemented\r\n", "not impl"},
-		{"STRU F", "502 Command not implemented\r\n", "not impl"},
+		{"TYPE I", "200 Command okay\r\n", "TYPE I"},
+		{"TYPE A", "200 Command okay\r\n", "TYPE A"},
+		{"type a n", "200 Command okay\r\n", "type a n"},
+		{"type i", "200 Command okay\r\n", "type i"},
+		{"TYPE A T", "504 Command not implemented for that parameter\r\n", "TYPE A T"},
+		{"TYPE A C", "504 Command not implemented for that parameter\r\n", "TYPE A C"},
+		{"TYPE E", "504 Command not implemented for that parameter\r\n", "TYPE E"},
+		{"TYPE E N", "504 Command not implemented for that parameter\r\n", "TYPE E N"},
+		{"TYPE E T", "504 Command not implemented for that parameter\r\n", "TYPE E T"},
+		{"TYPE E C", "504 Command not implemented for that parameter\r\n", "TYPE E C"},
+		{"TYPE L 8", "504 Command not implemented for that parameter\r\n", "TYPE L 8"},
+		{"TYPE L 16", "504 Command not implemented for that parameter\r\n", "TYPE L 16"},
+		{"TYPE", "501 Syntax error in parameters or arguments\r\n", "TYPE"},
+		{"TYPE A X", "501 Syntax error in parameters or arguments\r\n", "TYPE A X"},
+		{"TYPE A N 8", "501 Syntax error in parameters or arguments\r\n", "TYPE A extra byte size"},
+		{"TYPE E N 8", "501 Syntax error in parameters or arguments\r\n", "TYPE E extra byte size"},
+		{"TYPE I extra", "501 Syntax error in parameters or arguments\r\n", "TYPE I extra"},
+		{"TYPE L", "501 Syntax error in parameters or arguments\r\n", "TYPE L"},
+		{"TYPE L 0", "501 Syntax error in parameters or arguments\r\n", "TYPE L 0"},
+		{"TYPE L 8 N", "501 Syntax error in parameters or arguments\r\n", "TYPE L extra format"},
+		{"TYPE L 256", "501 Syntax error in parameters or arguments\r\n", "TYPE L invalid byte size"},
+		{"MODE S", "200 Command okay\r\n", "MODE S"},
+		{"mode s", "200 Command okay\r\n", "mode s"},
+		{"MODE B", "504 Command not implemented for that parameter\r\n", "MODE B"},
+		{"MODE C", "504 Command not implemented for that parameter\r\n", "MODE C"},
+		{"MODE", "501 Syntax error in parameters or arguments\r\n", "MODE"},
+		{"MODE S extra", "501 Syntax error in parameters or arguments\r\n", "MODE S extra"},
+		{"STRU F", "200 Command okay\r\n", "STRU F"},
+		{"stru f", "200 Command okay\r\n", "stru f"},
+		{"STRU R", "504 Command not implemented for that parameter\r\n", "STRU R"},
+		{"STRU P", "504 Command not implemented for that parameter\r\n", "STRU P"},
+		{"STRU", "501 Syntax error in parameters or arguments\r\n", "STRU"},
+		{"STRU F extra", "501 Syntax error in parameters or arguments\r\n", "STRU F extra"},
 		{"PORT 127,0,0,1,195,80", "502 Command not implemented\r\n", "not impl"},
 		{"RETR report.txt", "502 Command not implemented\r\n", "not impl"},
 		{"STOR report.txt", "502 Command not implemented\r\n", "not impl"},
@@ -256,6 +283,118 @@ func TestControlSessionHandlers(t *testing.T) {
 	expected.Done = true
 	if err != nil || reply.String() != "221 Service closing control connection\r\n" || !ControlSessionsMatch(&session, &expected) {
 		t.Fatalf("QUIT did not finish session correctly: %#v, %v, %#v", reply, err, session)
+	}
+}
+
+func TestTypeHandler(t *testing.T) {
+	var testCases = []struct {
+		command  string
+		code     uint32
+		expected pi.TypeCode
+		caseName string
+	}{
+		{"TYPE A", 200, pi.ASCII, "ASCII default format"},
+		{"TYPE A N", 200, pi.ASCII, "ASCII Non-print"},
+		{"TYPE I", 200, pi.IMAGE, "Image"},
+		{"TYPE A T", 504, pi.IMAGE, "ASCII Telnet"},
+		{"TYPE A C", 504, pi.IMAGE, "ASCII carriage control"},
+		{"TYPE E N", 504, pi.IMAGE, "EBCDIC Non-print"},
+		{"TYPE E T", 504, pi.IMAGE, "EBCDIC Telnet"},
+		{"TYPE E C", 504, pi.IMAGE, "EBCDIC carriage control"},
+		{"TYPE L 8", 504, pi.IMAGE, "Local 8"},
+		{"TYPE L 16", 504, pi.IMAGE, "Local 16"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.caseName, func(t *testing.T) {
+			session := controlSession{Path: "/files", Type: pi.IMAGE, Mode: pi.STREAM, Structure: pi.FILE, MockDB: map[string]string{constants.DEFAULT_USER: constants.DEFAULT_PASS}}
+			if tc.code == 200 && tc.expected == pi.IMAGE {
+				session.Type = pi.ASCII
+			}
+			expected := session
+			expected.Type = tc.expected
+			cmds, err := pi.Interpret(tc.command + "\r\n")
+			if err != nil || len(cmds) != 1 {
+				t.Fatalf("unable to interpret %q: %v", tc.command, err)
+			}
+			reply, err := session.RouteHandler(&cmds[0])
+			if err != nil || reply.Code != tc.code ||
+				session.Path != expected.Path || session.Type != expected.Type ||
+				session.Mode != expected.Mode || session.Structure != expected.Structure ||
+				session.Done != expected.Done || len(session.MockDB) != 1 ||
+				session.MockDB[constants.DEFAULT_USER] != constants.DEFAULT_PASS {
+				t.Fatalf("unexpected TYPE result: %#v, %v, session %#v, expected %#v", reply, err, session, expected)
+			}
+		})
+	}
+}
+
+func TestModeHandler(t *testing.T) {
+	var testCases = []struct {
+		command  string
+		code     uint32
+		expected pi.ModeCode
+		caseName string
+	}{
+		{"MODE S", 200, pi.STREAM, "Stream"},
+		{"MODE B", 504, pi.STREAM, "Block"},
+		{"MODE C", 504, pi.STREAM, "Compressed"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.caseName, func(t *testing.T) {
+			session := controlSession{Path: "/files", Type: pi.IMAGE, Mode: pi.STREAM, Structure: pi.FILE, MockDB: map[string]string{constants.DEFAULT_USER: constants.DEFAULT_PASS}}
+			if tc.code == 200 {
+				session.Mode = pi.BLOCK
+			}
+			expected := session
+			expected.Mode = tc.expected
+			cmds, err := pi.Interpret(tc.command + "\r\n")
+			if err != nil || len(cmds) != 1 {
+				t.Fatalf("unable to interpret %q: %v", tc.command, err)
+			}
+			reply, err := session.RouteHandler(&cmds[0])
+			if err != nil || reply.Code != tc.code ||
+				session.Path != expected.Path || session.Type != expected.Type ||
+				session.Mode != expected.Mode || session.Structure != expected.Structure ||
+				session.Done != expected.Done || len(session.MockDB) != 1 ||
+				session.MockDB[constants.DEFAULT_USER] != constants.DEFAULT_PASS {
+				t.Fatalf("unexpected MODE result: %#v, %v, session %#v, expected %#v", reply, err, session, expected)
+			}
+		})
+	}
+}
+
+func TestStructureHandler(t *testing.T) {
+	var testCases = []struct {
+		command  string
+		code     uint32
+		expected pi.StructureCode
+		caseName string
+	}{
+		{"STRU F", 200, pi.FILE, "File"},
+		{"STRU R", 504, pi.FILE, "Record"},
+		{"STRU P", 504, pi.FILE, "Page"},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.caseName, func(t *testing.T) {
+			session := controlSession{Path: "/files", Type: pi.IMAGE, Mode: pi.STREAM, Structure: pi.FILE, MockDB: map[string]string{constants.DEFAULT_USER: constants.DEFAULT_PASS}}
+			if tc.code == 200 {
+				session.Structure = pi.RECORD
+			}
+			expected := session
+			expected.Structure = tc.expected
+			cmds, err := pi.Interpret(tc.command + "\r\n")
+			if err != nil || len(cmds) != 1 {
+				t.Fatalf("unable to interpret %q: %v", tc.command, err)
+			}
+			reply, err := session.RouteHandler(&cmds[0])
+			if err != nil || reply.Code != tc.code ||
+				session.Path != expected.Path || session.Type != expected.Type ||
+				session.Mode != expected.Mode || session.Structure != expected.Structure ||
+				session.Done != expected.Done || len(session.MockDB) != 1 ||
+				session.MockDB[constants.DEFAULT_USER] != constants.DEFAULT_PASS {
+				t.Fatalf("unexpected STRU result: %#v, %v, session %#v, expected %#v", reply, err, session, expected)
+			}
+		})
 	}
 }
 

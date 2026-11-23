@@ -112,7 +112,7 @@ func handleInterpretError(err error, conn net.Conn) bool {
 	case errors.Is(err, pi.ErrInvalidCommand):
 		reply = pi.MakeFTPReply(500, "Syntax error, command unrecognized")
 	case errors.Is(err, pi.ErrInvalidArguments):
-		reply = pi.MakeFTPReply(501, "Syntax error in parameters or arguments")
+		reply = constants.InvalidArgumentsReply
 	default:
 		fmt.Fprintf(os.Stderr, "Unable to interpret command: %v", err)
 		return true
@@ -318,18 +318,30 @@ func (session *controlSession) PortHandler(cmd *pi.PortArgs) (pi.FTPReply, error
 }
 
 // handle Type command
-func (session *controlSession) TypeHandler(cmd *pi.TypeArgs) (pi.FTPReply, error) {
-	return pi.FTPReply{}, nil
+func (session *controlSession) TypeHandler(args *pi.TypeArgs) (pi.FTPReply, error) {
+	if args.Code != pi.IMAGE && (args.Code != pi.ASCII || args.Format != pi.NONPRINT) {
+		return constants.ParameterNotImplementedReply, nil
+	}
+	session.Type = args.Code
+	return constants.CommandOkReply, nil
 }
 
 // handle Mode command
-func (session *controlSession) ModeHandler(cmd *pi.ModeArgs) (pi.FTPReply, error) {
-	return pi.FTPReply{}, nil
+func (session *controlSession) ModeHandler(args *pi.ModeArgs) (pi.FTPReply, error) {
+	if args.Code != pi.STREAM {
+		return constants.ParameterNotImplementedReply, nil
+	}
+	session.Mode = args.Code
+	return constants.CommandOkReply, nil
 }
 
 // handle Structure command
-func (session *controlSession) StructureHandler(cmd *pi.StructureArgs) (pi.FTPReply, error) {
-	return pi.FTPReply{}, nil
+func (session *controlSession) StructureHandler(args *pi.StructureArgs) (pi.FTPReply, error) {
+	if args.Code != pi.FILE {
+		return constants.ParameterNotImplementedReply, nil
+	}
+	session.Structure = args.Code
+	return constants.CommandOkReply, nil
 }
 
 // handle Retrieve command

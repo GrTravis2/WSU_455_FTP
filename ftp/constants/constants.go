@@ -19,5 +19,7 @@ var UserLoggedInReply = pi.MakeFTPReply(230, "User logged in")
 var NotLoggedInReply = pi.MakeFTPReply(530, "Not logged in")
 var QuitConnectionReply = pi.MakeFTPReply(221, "Service closing control connection")
 var CommandOkReply = pi.MakeFTPReply(200, "Command okay")
+var InvalidArgumentsReply = pi.MakeFTPReply(501, "Syntax error in parameters or arguments")
+var ParameterNotImplementedReply = pi.MakeFTPReply(504, "Command not implemented for that parameter")
 
 // FTP Errors
