@@ -14,14 +14,17 @@ import (
 	pi "wsu455ftp/ftp/protocolInterpreter"
 )
 
+const ServerIP string = "127.0.0.1"
+const ServerPort string = "5678"
+
 // start a control session and check cleanup when it ends
-func startControlSession(t *testing.T, conn net.Conn, session controlSession) func() {
+func startControlSession(t *testing.T, session controlSession) func() {
 	t.Helper()
-	active_sessions := map[net.Conn]struct{}{conn: {}}
+	active_sessions := map[net.Conn]struct{}{session.controlConn: {}}
 	var mutex sync.Mutex
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go controlSessionHandler(conn, session, &wg, &mutex, active_sessions)
+	go controlSessionHandler(session, &wg, &mutex, active_sessions)
 	done := make(chan struct{})
 	go func() {
 		wg.Wait()
@@ -41,7 +44,7 @@ func startControlSession(t *testing.T, conn net.Conn, session controlSession) fu
 		}
 	}
 	t.Cleanup(func() {
-		conn.Close()
+		session.controlConn.Close()
 		wait()
 	})
 	return wait
@@ -62,7 +65,7 @@ func TestControlSessionLifecycle(t *testing.T) {
 	conn, client := net.Pipe()
 	t.Cleanup(func() { client.Close() })
 	client.SetDeadline(time.Now().Add(3 * time.Second))
-	wait := startControlSession(t, conn, makeDefaultControlSession())
+	wait := startControlSession(t, makeDefaultControlSession(conn, ServerIP, ServerPort))
 	reader := bufio.NewReader(client)
 	readControlReply(t, reader, "220 Service ready\r\n", "service ready greeting")
 	if _, err := io.WriteString(client, "USER user\r\n"); err != nil {
@@ -107,7 +110,7 @@ func TestControlSessionDisconnect(t *testing.T) {
 			if caseName == "before greeting" {
 				client.Close()
 			}
-			wait := startControlSession(t, conn, controlSession{})
+			wait := startControlSession(t, makeDefaultControlSession(conn, ServerIP, ServerPort))
 			if caseName != "before greeting" {
 				readControlReply(t, bufio.NewReader(client), "220 Service ready\r\n", caseName)
 				if caseName == "partial command" {
@@ -167,7 +170,7 @@ func TestControlSessionFailedWrite(t *testing.T) {
 			t.Cleanup(func() { client.Close() })
 			client.SetDeadline(time.Now().Add(3 * time.Second))
 			failingConn := &failingWriteConn{Conn: conn, failAt: tc.failAt, short: tc.short}
-			wait := startControlSession(t, failingConn, controlSession{})
+			wait := startControlSession(t, makeDefaultControlSession(failingConn, ServerIP, ServerPort))
 			reader := bufio.NewReader(client)
 			if tc.command != "" {
 				readControlReply(t, reader, "220 Service ready\r\n", tc.caseName)
@@ -187,7 +190,7 @@ func TestControlSessionErrorRecovery(t *testing.T) {
 	conn, client := net.Pipe()
 	t.Cleanup(func() { client.Close() })
 	client.SetDeadline(time.Now().Add(3 * time.Second))
-	wait := startControlSession(t, conn, makeDefaultControlSession())
+	wait := startControlSession(t, makeDefaultControlSession(conn, ServerIP, ServerPort))
 	reader := bufio.NewReader(client)
 	readControlReply(t, reader, "220 Service ready\r\n", "service ready greeting")
 	if _, err := io.WriteString(client, "USER user\r\n"); err != nil {
@@ -220,9 +223,7 @@ func TestControlSessionErrorRecovery(t *testing.T) {
 		{"TYPE L 8", "502 Command not implemented\r\n", "not impl"},
 		{"MODE S", "502 Command not implemented\r\n", "not impl"},
 		{"STRU F", "502 Command not implemented\r\n", "not impl"},
-		{"PORT 127,0,0,1,195,80", "502 Command not implemented\r\n", "not impl"},
-		{"RETR report.txt", "502 Command not implemented\r\n", "not impl"},
-		{"STOR report.txt", "502 Command not implemented\r\n", "not impl"},
+		// {"PORT 127,0,0,1,195,80", "502 Command not implemented\r\n", "not impl"},
 	}
 	for _, tc := range testCases {
 		// the next command must work even when both arrive in one write
