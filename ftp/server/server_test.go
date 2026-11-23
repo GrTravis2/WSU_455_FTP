@@ -228,9 +228,13 @@ func TestControlSessionErrorRecovery(t *testing.T) {
 		{"TYPE L 16", "504 Command not implemented for that parameter\r\n", "TYPE L 16"},
 		{"TYPE", "501 Syntax error in parameters or arguments\r\n", "TYPE"},
 		{"TYPE A X", "501 Syntax error in parameters or arguments\r\n", "TYPE A X"},
+		{"TYPE A N 8", "501 Syntax error in parameters or arguments\r\n", "TYPE A extra byte size"},
+		{"TYPE E N 8", "501 Syntax error in parameters or arguments\r\n", "TYPE E extra byte size"},
 		{"TYPE I extra", "501 Syntax error in parameters or arguments\r\n", "TYPE I extra"},
 		{"TYPE L", "501 Syntax error in parameters or arguments\r\n", "TYPE L"},
 		{"TYPE L 0", "501 Syntax error in parameters or arguments\r\n", "TYPE L 0"},
+		{"TYPE L 8 N", "501 Syntax error in parameters or arguments\r\n", "TYPE L extra format"},
+		{"TYPE L 256", "501 Syntax error in parameters or arguments\r\n", "TYPE L invalid byte size"},
 		{"MODE S", "200 Command okay\r\n", "MODE S"},
 		{"mode s", "200 Command okay\r\n", "mode s"},
 		{"MODE B", "504 Command not implemented for that parameter\r\n", "MODE B"},
@@ -284,29 +288,21 @@ func TestControlSessionHandlers(t *testing.T) {
 
 func TestTypeHandler(t *testing.T) {
 	var testCases = []struct {
-		args     pi.FTPArgs
+		command  string
 		code     uint32
 		expected pi.TypeCode
 		caseName string
 	}{
-		{pi.TypeArgs{pi.ASCII, pi.NONPRINT, 0}, 200, pi.ASCII, "ASCII Non-print"},
-		{pi.TypeArgs{pi.IMAGE, pi.NONE, 0}, 200, pi.IMAGE, "Image"},
-		{pi.TypeArgs{pi.ASCII, pi.TELNET, 0}, 504, pi.IMAGE, "ASCII Telnet"},
-		{pi.TypeArgs{pi.ASCII, pi.CARRIAGE, 0}, 504, pi.IMAGE, "ASCII carriage control"},
-		{pi.TypeArgs{pi.EBCDIC, pi.NONPRINT, 0}, 504, pi.IMAGE, "EBCDIC Non-print"},
-		{pi.TypeArgs{pi.EBCDIC, pi.TELNET, 0}, 504, pi.IMAGE, "EBCDIC Telnet"},
-		{pi.TypeArgs{pi.EBCDIC, pi.CARRIAGE, 0}, 504, pi.IMAGE, "EBCDIC carriage control"},
-		{pi.TypeArgs{pi.LOCAL, pi.NONE, 8}, 504, pi.IMAGE, "Local 8"},
-		{pi.TypeArgs{pi.LOCAL, pi.NONE, 16}, 504, pi.IMAGE, "Local 16"},
-		{nil, 501, pi.IMAGE, "missing arguments"},
-		{pi.ModeArgs{}, 501, pi.IMAGE, "wrong argument type"},
-		{pi.TypeArgs{}, 501, pi.IMAGE, "invalid type"},
-		{pi.TypeArgs{pi.ASCII, 'X', 0}, 501, pi.IMAGE, "invalid format"},
-		{pi.TypeArgs{pi.ASCII, pi.NONPRINT, 8}, 501, pi.IMAGE, "ASCII with byte size"},
-		{pi.TypeArgs{pi.IMAGE, pi.NONPRINT, 0}, 501, pi.IMAGE, "Image with format"},
-		{pi.TypeArgs{pi.IMAGE, pi.NONE, 8}, 501, pi.IMAGE, "Image with byte size"},
-		{pi.TypeArgs{pi.LOCAL, pi.NONE, 0}, 501, pi.IMAGE, "Local without byte size"},
-		{pi.TypeArgs{pi.LOCAL, pi.NONPRINT, 8}, 501, pi.IMAGE, "Local with format"},
+		{"TYPE A", 200, pi.ASCII, "ASCII default format"},
+		{"TYPE A N", 200, pi.ASCII, "ASCII Non-print"},
+		{"TYPE I", 200, pi.IMAGE, "Image"},
+		{"TYPE A T", 504, pi.IMAGE, "ASCII Telnet"},
+		{"TYPE A C", 504, pi.IMAGE, "ASCII carriage control"},
+		{"TYPE E N", 504, pi.IMAGE, "EBCDIC Non-print"},
+		{"TYPE E T", 504, pi.IMAGE, "EBCDIC Telnet"},
+		{"TYPE E C", 504, pi.IMAGE, "EBCDIC carriage control"},
+		{"TYPE L 8", 504, pi.IMAGE, "Local 8"},
+		{"TYPE L 16", 504, pi.IMAGE, "Local 16"},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.caseName, func(t *testing.T) {
@@ -316,7 +312,11 @@ func TestTypeHandler(t *testing.T) {
 			}
 			expected := session
 			expected.Type = tc.expected
-			reply, err := session.RouteHandler(&pi.FTPCommand{Token: pi.TYPE, Args: tc.args})
+			cmds, err := pi.Interpret(tc.command + "\r\n")
+			if err != nil || len(cmds) != 1 {
+				t.Fatalf("unable to interpret %q: %v", tc.command, err)
+			}
+			reply, err := session.RouteHandler(&cmds[0])
 			if err != nil || reply.Code != tc.code ||
 				session.Path != expected.Path || session.Type != expected.Type ||
 				session.Mode != expected.Mode || session.Structure != expected.Structure ||
@@ -330,17 +330,14 @@ func TestTypeHandler(t *testing.T) {
 
 func TestModeHandler(t *testing.T) {
 	var testCases = []struct {
-		args     pi.FTPArgs
+		command  string
 		code     uint32
 		expected pi.ModeCode
 		caseName string
 	}{
-		{pi.ModeArgs{pi.STREAM}, 200, pi.STREAM, "Stream"},
-		{pi.ModeArgs{pi.BLOCK}, 504, pi.STREAM, "Block"},
-		{pi.ModeArgs{pi.COMPRESSED}, 504, pi.STREAM, "Compressed"},
-		{nil, 501, pi.STREAM, "missing arguments"},
-		{pi.TypeArgs{}, 501, pi.STREAM, "wrong argument type"},
-		{pi.ModeArgs{'X'}, 501, pi.STREAM, "invalid mode"},
+		{"MODE S", 200, pi.STREAM, "Stream"},
+		{"MODE B", 504, pi.STREAM, "Block"},
+		{"MODE C", 504, pi.STREAM, "Compressed"},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.caseName, func(t *testing.T) {
@@ -350,7 +347,11 @@ func TestModeHandler(t *testing.T) {
 			}
 			expected := session
 			expected.Mode = tc.expected
-			reply, err := session.RouteHandler(&pi.FTPCommand{Token: pi.MODE, Args: tc.args})
+			cmds, err := pi.Interpret(tc.command + "\r\n")
+			if err != nil || len(cmds) != 1 {
+				t.Fatalf("unable to interpret %q: %v", tc.command, err)
+			}
+			reply, err := session.RouteHandler(&cmds[0])
 			if err != nil || reply.Code != tc.code ||
 				session.Path != expected.Path || session.Type != expected.Type ||
 				session.Mode != expected.Mode || session.Structure != expected.Structure ||
@@ -364,17 +365,14 @@ func TestModeHandler(t *testing.T) {
 
 func TestStructureHandler(t *testing.T) {
 	var testCases = []struct {
-		args     pi.FTPArgs
+		command  string
 		code     uint32
 		expected pi.StructureCode
 		caseName string
 	}{
-		{pi.StructureArgs{pi.FILE}, 200, pi.FILE, "File"},
-		{pi.StructureArgs{pi.RECORD}, 504, pi.FILE, "Record"},
-		{pi.StructureArgs{pi.PAGE}, 504, pi.FILE, "Page"},
-		{nil, 501, pi.FILE, "missing arguments"},
-		{pi.ModeArgs{}, 501, pi.FILE, "wrong argument type"},
-		{pi.StructureArgs{'X'}, 501, pi.FILE, "invalid structure"},
+		{"STRU F", 200, pi.FILE, "File"},
+		{"STRU R", 504, pi.FILE, "Record"},
+		{"STRU P", 504, pi.FILE, "Page"},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.caseName, func(t *testing.T) {
@@ -384,7 +382,11 @@ func TestStructureHandler(t *testing.T) {
 			}
 			expected := session
 			expected.Structure = tc.expected
-			reply, err := session.RouteHandler(&pi.FTPCommand{Token: pi.STRU, Args: tc.args})
+			cmds, err := pi.Interpret(tc.command + "\r\n")
+			if err != nil || len(cmds) != 1 {
+				t.Fatalf("unable to interpret %q: %v", tc.command, err)
+			}
+			reply, err := session.RouteHandler(&cmds[0])
 			if err != nil || reply.Code != tc.code ||
 				session.Path != expected.Path || session.Type != expected.Type ||
 				session.Mode != expected.Mode || session.Structure != expected.Structure ||
