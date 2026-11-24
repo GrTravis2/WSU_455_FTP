@@ -23,6 +23,7 @@ type clientSession struct {
 }
 
 var ErrLoginFailed = errors.New("FTP login failed")
+var ErrCommandRejected = errors.New("FTP command rejected")
 
 // Create and authenticate a new client session
 func NewSession(user string, pass string, ipV4 string, port string) (clientSession, error) {
@@ -101,20 +102,54 @@ func (client *clientSession) Quit() error {
 	return nil
 }
 
+func (client *clientSession) Close() error {
+	return client.openConn.Close()
+}
+
 func (client *clientSession) SetPort(ipV4 string, port uint16) error {
 	panic("Not Implemented!")
 }
 
 func (client *clientSession) SetType(typeCode pi.TypeCode, formatCode pi.FormatCode, byteSize uint8) error {
-	panic("Not Implemented!")
+	reply, err := client.sendCmd(pi.MakeTypeCmd(typeCode, formatCode, byteSize))
+	if err != nil {
+		return err
+	}
+	if reply.Code >= 400 && reply.Code < 600 {
+		return fmt.Errorf("%w: %s", ErrCommandRejected, reply.String())
+	}
+	if reply.Code != constants.CommandOkReply.Code {
+		return fmt.Errorf("unexpected server reply: %s", reply.String())
+	}
+	return nil
 }
 
 func (client *clientSession) SetMode(code pi.ModeCode) error {
-	panic("Not Implemented!")
+	reply, err := client.sendCmd(pi.MakeModeCmd(code))
+	if err != nil {
+		return err
+	}
+	if reply.Code >= 400 && reply.Code < 600 {
+		return fmt.Errorf("%w: %s", ErrCommandRejected, reply.String())
+	}
+	if reply.Code != constants.CommandOkReply.Code {
+		return fmt.Errorf("unexpected server reply: %s", reply.String())
+	}
+	return nil
 }
 
 func (client *clientSession) SetStru(code pi.StructureCode) error {
-	panic("Not Implemented!")
+	reply, err := client.sendCmd(pi.MakeStruCmd(code))
+	if err != nil {
+		return err
+	}
+	if reply.Code >= 400 && reply.Code < 600 {
+		return fmt.Errorf("%w: %s", ErrCommandRejected, reply.String())
+	}
+	if reply.Code != constants.CommandOkReply.Code {
+		return fmt.Errorf("unexpected server reply: %s", reply.String())
+	}
+	return nil
 }
 
 func (client *clientSession) Retrieve(path string) error {
